@@ -15,6 +15,12 @@ const pdfParse = require('pdf-parse');
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+console.log('Server starting. GEMINI_API_KEY length:', process.env.GEMINI_API_KEY?.length);
+
+setInterval(() => {
+  fs.appendFileSync('key-length.log', `Periodic check. GEMINI_API_KEY length: ${process.env.GEMINI_API_KEY?.length}, starts with: ${process.env.GEMINI_API_KEY?.substring(0, 3)}\n`);
+}, 1000);
+
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // In-memory database for MVP
@@ -26,7 +32,7 @@ const db = {
 
 async function startServer() {
   const app = express();
-  const PORT = parseInt(process.env.PORT || '3000', 10);
+  const PORT = 3000;
 
   app.use(cors());
   app.use(express.json({ limit: '50mb' }));
@@ -95,6 +101,7 @@ async function startServer() {
 
   app.post('/api/generate-course', async (req, res) => {
     try {
+      console.log('Inside generate-course. GEMINI_API_KEY length:', process.env.GEMINI_API_KEY?.length);
       const { fileId, level, tone, options } = req.body;
       const sourceText = db.files[fileId] || "General knowledge topic: " + fileId;
 
@@ -156,9 +163,9 @@ async function startServer() {
       db.courses[courseId] = courseData;
 
       res.json({ courseId, message: 'Course generated successfully' });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Generate course error:', error);
-      res.status(500).json({ error: 'Failed to generate course' });
+      res.status(500).json({ error: 'Failed to generate course', details: error.message, keyLength: process.env.GEMINI_API_KEY?.length });
     }
   });
 
