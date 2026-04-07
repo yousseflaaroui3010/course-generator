@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload, FileText, Settings, Wand2, Loader2, CheckCircle2 } from 'lucide-react';
+import { useToast } from '../components/Toast';
+import { geminiService } from '../services/gemini';
 
 export default function CourseBuilder() {
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const [step, setStep] = useState(1);
   const [file, setFile] = useState<File | null>(null);
   const [fileId, setFileId] = useState<string>('');
@@ -41,12 +44,13 @@ export default function CourseBuilder() {
         if (data.fileId) {
           setFileId(data.fileId);
           setStep(2);
+          showToast('File uploaded successfully', 'success');
         } else {
-          alert('Failed to upload file');
+          showToast('Failed to upload file', 'error');
         }
       } catch (err) {
         console.error(err);
-        alert('Error uploading file');
+        showToast('Error uploading file', 'error');
       } finally {
         setIsUploading(false);
       }
@@ -65,34 +69,42 @@ export default function CourseBuilder() {
     }, 500);
 
     try {
-      const res = await fetch('/api/generate-course', {
+      // 1. Get the source text from the backend
+      const fileRes = await fetch(`/api/files/${fileId}`);
+      if (!fileRes.ok) throw new Error('Failed to retrieve source text');
+      const { text: sourceText } = await fileRes.json();
+
+      // 2. Generate the course using Gemini in the frontend
+      const courseData = await geminiService.generateCourse(sourceText, level, tone, options);
+      
+      if (!courseData || !courseData.chapters || !Array.isArray(courseData.chapters) || courseData.chapters.length === 0) {
+        throw new Error('AI failed to generate a valid course structure. Please try again.');
+      }
+
+      // 3. Save the generated course to the backend
+      const saveRes = await fetch('/api/courses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileId, level, tone, options })
+        body: JSON.stringify(courseData)
       });
       
-      const text = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
-      }
+      const saveResult = await saveRes.json();
       
       clearInterval(interval);
       setProgress(100);
       
-      if (data.courseId) {
+      if (saveResult.courseId) {
+        showToast('Course generated successfully!', 'success');
         setTimeout(() => {
-          navigate(`/course/${data.courseId}`);
+          navigate(`/course/${saveResult.courseId}`);
         }, 1000);
       } else {
-        alert('Failed to generate course');
+        showToast('Failed to save generated course', 'error');
         setIsGenerating(false);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Error generating course');
+      showToast(`Error: ${err.message || 'Failed to generate course'}`, 'error');
       clearInterval(interval);
       setIsGenerating(false);
     }
@@ -101,8 +113,8 @@ export default function CourseBuilder() {
   return (
     <div className="max-w-4xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Course Builder</h1>
-        <p className="mt-2 text-gray-600">Transform documents into interactive learning experiences.</p>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Course Builder</h1>
+        <p className="mt-2 text-gray-600 dark:text-gray-400">Transform documents into interactive learning experiences.</p>
       </div>
 
       {/* Stepper */}
@@ -115,23 +127,23 @@ export default function CourseBuilder() {
           ].map((s) => (
             <div key={s.num} className="flex flex-col items-center relative z-10">
               <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 ${
-                step >= s.num ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400'
+                step >= s.num ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-700 text-gray-400 dark:text-gray-500'
               }`}>
                 <s.icon className="w-5 h-5" />
               </div>
-              <span className={`mt-2 text-sm font-medium ${step >= s.num ? 'text-indigo-600' : 'text-gray-500'}`}>
+              <span className={`mt-2 text-sm font-medium ${step >= s.num ? 'text-indigo-600' : 'text-gray-500 dark:text-gray-400'}`}>
                 {s.label}
               </span>
             </div>
           ))}
-          <div className="absolute top-5 left-0 w-full h-0.5 bg-gray-200 -z-10"></div>
+          <div className="absolute top-5 left-0 w-full h-0.5 bg-gray-200 dark:bg-gray-800 -z-10"></div>
         </div>
       </div>
 
-      <div className="bg-white shadow-sm rounded-xl border border-gray-200 p-8">
+      <div className="bg-white dark:bg-gray-900 shadow-sm rounded-xl border border-gray-200 dark:border-gray-800 p-8">
         {step === 1 && (
           <div className="text-center">
-            <div className="border-2 border-dashed border-gray-300 rounded-xl p-12 hover:bg-gray-50 transition-colors cursor-pointer relative">
+            <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-12 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer relative">
               <input 
                 type="file" 
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
@@ -142,33 +154,33 @@ export default function CourseBuilder() {
               {isUploading ? (
                 <Loader2 className="mx-auto h-12 w-12 text-indigo-500 animate-spin" />
               ) : (
-                <Upload className="mx-auto h-12 w-12 text-gray-400" />
+                <Upload className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-600" />
               )}
-              <h3 className="mt-4 text-lg font-medium text-gray-900">
+              <h3 className="mt-4 text-lg font-medium text-gray-900 dark:text-white">
                 {isUploading ? 'Uploading...' : 'Upload a document'}
               </h3>
-              <p className="mt-2 text-sm text-gray-500">PDF, Markdown, or Plain Text up to 50MB</p>
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">PDF, Markdown, or Plain Text up to 50MB</p>
             </div>
           </div>
         )}
 
         {step >= 2 && (
           <div className="space-y-6">
-            <div className="flex items-center p-4 bg-indigo-50 rounded-lg border border-indigo-100">
-              <FileText className="w-8 h-8 text-indigo-600 mr-4" />
+            <div className="flex items-center p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-100 dark:border-indigo-900/30">
+              <FileText className="w-8 h-8 text-indigo-600 dark:text-indigo-400 mr-4" />
               <div>
-                <p className="font-medium text-indigo-900">{file?.name}</p>
-                <p className="text-sm text-indigo-700">{((file?.size || 0) / 1024 / 1024).toFixed(2)} MB</p>
+                <p className="font-medium text-indigo-900 dark:text-indigo-100">{file?.name}</p>
+                <p className="text-sm text-indigo-700 dark:text-indigo-300">{((file?.size || 0) / 1024 / 1024).toFixed(2)} MB</p>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Target Audience Level</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Target Audience Level</label>
                 <select 
                   value={level}
                   onChange={(e) => setLevel(e.target.value)}
-                  className="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border"
+                  className="w-full bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border"
                 >
                   <option>Beginner</option>
                   <option>Intermediate</option>
@@ -176,11 +188,11 @@ export default function CourseBuilder() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tone</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tone</label>
                 <select 
                   value={tone}
                   onChange={(e) => setTone(e.target.value)}
-                  className="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border"
+                  className="w-full bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border"
                 >
                   <option>Academic & Formal</option>
                   <option>Conversational & Engaging</option>
@@ -190,24 +202,24 @@ export default function CourseBuilder() {
             </div>
 
             <div className="space-y-3">
-              <h4 className="text-sm font-medium text-gray-900">Generation Options</h4>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white">Generation Options</h4>
               <label className="flex items-center space-x-3">
                 <input 
                   type="checkbox" 
                   checked={options.quizzes}
                   onChange={(e) => setOptions({...options, quizzes: e.target.checked})}
-                  className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4" 
+                  className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 dark:bg-gray-800 dark:border-gray-700" 
                 />
-                <span className="text-sm text-gray-700">Generate Quizzes & Assessments</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">Generate Quizzes & Assessments</span>
               </label>
               <label className="flex items-center space-x-3">
                 <input 
                   type="checkbox" 
                   checked={options.visuals}
                   onChange={(e) => setOptions({...options, visuals: e.target.checked})}
-                  className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4" 
+                  className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 dark:bg-gray-800 dark:border-gray-700" 
                 />
-                <span className="text-sm text-gray-700">Include Visuals (Diagrams & Charts)</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">Include Visuals (Diagrams & Charts)</span>
               </label>
             </div>
 

@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { Film, Wand2, Play, Download, Settings2, Loader2 } from 'lucide-react';
+import { useToast } from '../components/Toast';
+import { geminiService } from '../services/gemini';
 
 export default function VideoStudio() {
+  const { showToast } = useToast();
   const [prompt, setPrompt] = useState('');
   const [style, setStyle] = useState('Minimalist Vector');
   const [voice, setVoice] = useState('Professional (Female)');
@@ -13,28 +16,31 @@ export default function VideoStudio() {
     setIsGenerating(true);
     setSceneMedia({});
     try {
-      const res = await fetch('/api/generate-video', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, style, voice })
-      });
+      // 1. Generate the video script using Gemini in the frontend
+      const videoData = await geminiService.generateVideoScript(prompt, style, voice);
       
-      const text = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
+      if (!videoData || !videoData.scenes || !Array.isArray(videoData.scenes) || videoData.scenes.length === 0) {
+        throw new Error('AI failed to generate a valid video script. Please try again.');
       }
 
-      if (data.video) {
-        setVideoData(data.video);
+      // 2. Save the generated video to the backend
+      const saveRes = await fetch('/api/videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(videoData)
+      });
+      
+      const saveResult = await saveRes.json();
+
+      if (saveResult.videoId) {
+        setVideoData(videoData);
+        showToast('Video script generated!', 'success');
       } else {
-        alert('Failed to generate video script');
+        showToast('Failed to save video script', 'error');
       }
     } catch (err) {
       console.error(err);
-      alert('Error generating video');
+      showToast('Error generating video', 'error');
     } finally {
       setIsGenerating(false);
     }
@@ -43,22 +49,10 @@ export default function VideoStudio() {
   const generateSceneImage = async (sceneId: string, visualDescription: string) => {
     setSceneMedia(prev => ({ ...prev, [sceneId]: { ...prev[sceneId], loadingImage: true } }));
     try {
-      const res = await fetch('/api/generate-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: `Visual style: ${style}. ${visualDescription}` })
-      });
+      const imageData = await geminiService.generateImage(`Visual style: ${style}. ${visualDescription}`);
       
-      const text = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
-      }
-
-      if (data.image) {
-        setSceneMedia(prev => ({ ...prev, [sceneId]: { ...prev[sceneId], image: `data:image/jpeg;base64,${data.image}` } }));
+      if (imageData) {
+        setSceneMedia(prev => ({ ...prev, [sceneId]: { ...prev[sceneId], image: `data:image/jpeg;base64,${imageData}` } }));
       }
     } catch (err) {
       console.error(err);
@@ -70,22 +64,13 @@ export default function VideoStudio() {
   const generateSceneAudio = async (sceneId: string, narration: string) => {
     setSceneMedia(prev => ({ ...prev, [sceneId]: { ...prev[sceneId], loadingAudio: true } }));
     try {
-      const res = await fetch('/api/generate-audio', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: narration, voiceName: voice.includes('Male') ? 'Fenrir' : 'Puck' })
-      });
-      
-      const text = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
-      }
+      const audioData = await geminiService.generateAudio(
+        narration, 
+        voice.includes('Male') ? 'Fenrir' : 'Puck'
+      );
 
-      if (data.audio) {
-        setSceneMedia(prev => ({ ...prev, [sceneId]: { ...prev[sceneId], audio: `data:audio/wav;base64,${data.audio}` } }));
+      if (audioData) {
+        setSceneMedia(prev => ({ ...prev, [sceneId]: { ...prev[sceneId], audio: `data:audio/wav;base64,${audioData}` } }));
       }
     } catch (err) {
       console.error(err);
@@ -98,23 +83,23 @@ export default function VideoStudio() {
     <div className="max-w-6xl mx-auto">
       <div className="mb-8 flex justify-between items-end">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Video Studio</h1>
-          <p className="mt-2 text-gray-600">Generate educational videos from topics or course content.</p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Video Studio</h1>
+          <p className="mt-2 text-gray-600 dark:text-gray-400">Generate educational videos from topics or course content.</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Controls */}
         <div className="lg:col-span-1 space-y-6">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Generation Settings</h2>
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6">
+            <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Generation Settings</h2>
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Source Topic or Text</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Source Topic or Text</label>
                 <textarea 
                   rows={4}
-                  className="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-3 border text-sm"
+                  className="w-full bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-3 border text-sm"
                   placeholder="E.g., Explain how photosynthesis works to a 5th grader..."
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
@@ -122,11 +107,11 @@ export default function VideoStudio() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Visual Style</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Visual Style</label>
                 <select 
                   value={style}
                   onChange={(e) => setStyle(e.target.value)}
-                  className="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border text-sm"
+                  className="w-full bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border text-sm"
                 >
                   <option>Minimalist Vector</option>
                   <option>Chalkboard</option>
@@ -135,11 +120,11 @@ export default function VideoStudio() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Voice</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Voice</label>
                 <select 
                   value={voice}
                   onChange={(e) => setVoice(e.target.value)}
-                  className="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border text-sm"
+                  className="w-full bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border text-sm"
                 >
                   <option>Professional (Female)</option>
                   <option>Energetic (Male)</option>
@@ -258,13 +243,13 @@ export default function VideoStudio() {
           </div>
 
           {videoData && (
-            <div className="mt-6 flex justify-between items-center bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+            <div className="mt-6 flex justify-between items-center bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
               <div>
-                <h3 className="font-medium text-gray-900">{videoData.title}</h3>
-                <p className="text-sm text-gray-500">{videoData.scenes?.length} Scenes â Generated just now</p>
+                <h3 className="font-medium text-gray-900 dark:text-white">{videoData.title}</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{videoData.scenes?.length} Scenes • Generated just now</p>
               </div>
               <div className="flex space-x-3">
-                <button className="px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                <button className="px-4 py-2 border border-gray-300 dark:border-gray-700 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                   Edit Script
                 </button>
                 <button className="flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700">
