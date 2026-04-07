@@ -1,1 +1,59 @@
 @import "tailwindcss";
+
+@layer base {
+  .dyslexic-friendly {
+    line-height: 1.8 !important;
+    letter-spacing: 0.03em !important;
+    word-spacing: 0.1em !important;
+    font-size: 1.125rem !important;
+  }
+  
+  .dyslexic-friendly p {
+    margin-bottom: 1.5rem !important;
+  }
+  
+  .dyslexic-friendly h1, 
+  .dyslexic-friendly h2, 
+  .dyslexic-friendly h3 {
+    margin-top: 2rem !important;
+    margin-bottom: 1rem !important;
+    letter-spacing: -0.01em !important;
+  }
+
+  .dyslexic-friendly strong {
+    color: #4f46e5; /* Indigo-600 for emphasis */
+    font-weight: 700;
+  }
+
+  .dyslexic-friendly ul, 
+  .dyslexic-friendly ol {
+    margin-bottom: 1.5rem !important;
+    padding-left: 1.5rem !important;
+  }
+
+  .dyslexic-friendly li {
+    margin-bottom: 0.75rem !important;
+  }
+}
+
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #e2e8f0;
+    border-radius: 10px;
+  }
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #1e293b;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #cbd5e1;
+  }
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #334155;
+  }
+}

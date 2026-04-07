@@ -11,7 +11,7 @@ export default function CourseView() {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [course, setCourse] = useState<any>(null);
-  const [activeChapterIndex, setActiveChapterIndex] = useState(0);
+  const [activeChapterIndex, setActiveChapterIndex] = useState(-1); // -1 for Overview
   const [activeTab, setActiveTab] = useState('learn');
   const [quizAnswers, setQuizAnswers] = useState<Record<number, number>>({});
   const [quizSubmitted, setQuizSubmitted] = useState(false);
@@ -20,6 +20,7 @@ export default function CourseView() {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [visualUrl, setVisualUrl] = useState<string | null>(null);
   const [isGeneratingVisual, setIsGeneratingVisual] = useState(false);
+  const [isExtending, setIsExtending] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
@@ -57,9 +58,14 @@ export default function CourseView() {
     setVisualUrl(null);
     setIsGeneratingVisual(false);
 
+    if (activeChapterIndex === -1) return;
+
     const currentChapter = course?.chapters?.[activeChapterIndex];
     if (currentChapter?.visualMetadata?.type === 'image' && currentChapter.visualMetadata.prompt) {
-      handleGenerateVisual(currentChapter.visualMetadata.prompt);
+      const enhancedPrompt = `Educational illustration for: "${currentChapter.title}". 
+        Description: ${currentChapter.visualMetadata.prompt}. 
+        Style: Professional, clean, educational, high quality, suitable for a course.`;
+      handleGenerateVisual(enhancedPrompt);
     }
   }, [activeChapterIndex, course]);
 
@@ -99,11 +105,21 @@ export default function CourseView() {
     );
   }
 
-  const currentChapter = course.chapters[activeChapterIndex];
+  const currentChapter = activeChapterIndex === -1 ? null : course.chapters[activeChapterIndex];
 
   const handleQuizSubmit = () => {
     setQuizSubmitted(true);
   };
+
+  useEffect(() => {
+    if (course && activeChapterIndex >= 0 && activeChapterIndex < course.chapters.length) {
+      fetch(`/api/courses/${course.id}/progress`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chapterIndex: activeChapterIndex })
+      }).catch(err => console.error('Failed to update progress:', err));
+    }
+  }, [activeChapterIndex, course?.id]);
 
   const handleNext = () => {
     if (activeChapterIndex < course.chapters.length - 1) {
@@ -111,11 +127,14 @@ export default function CourseView() {
       setActiveTab('learn');
       setQuizAnswers({});
       setQuizSubmitted(false);
+    } else if (activeChapterIndex === course.chapters.length - 1) {
+      // Move to completion state
+      setActiveChapterIndex(course.chapters.length);
     }
   };
 
   const handlePrev = () => {
-    if (activeChapterIndex > 0) {
+    if (activeChapterIndex > -1) {
       setActiveChapterIndex(activeChapterIndex - 1);
       setActiveTab('learn');
       setQuizAnswers({});
@@ -154,6 +173,51 @@ export default function CourseView() {
     }
   };
 
+  const handleExtendCourse = async () => {
+    if (!course.fileId) {
+      showToast('Source material not found for this course', 'error');
+      return;
+    }
+
+    setIsExtending(true);
+    try {
+      // 1. Fetch source text
+      const fileRes = await fetch(`/api/files/${course.fileId}`);
+      const fileData = await fileRes.json();
+      if (!fileData.text) throw new Error('Failed to fetch source text');
+
+      // 2. Generate more chapters
+      const existingTitles = course.chapters.map((c: any) => (c.title));
+      const newChapters = await geminiService.extendCourse(fileData.text, existingTitles);
+
+      if (newChapters && newChapters.length > 0) {
+        // Find current max batch index
+        const maxBatchIndex = Math.max(...course.chapters.map((c: any) => c.batchIndex || 0));
+        const chaptersWithBatch = newChapters.map((c: any) => ({ ...c, batchIndex: maxBatchIndex + 1 }));
+
+        const updatedCourse = {
+          ...course,
+          chapters: [...course.chapters, ...chaptersWithBatch]
+        };
+        
+        // 3. Save updated course
+        await fetch('/api/courses', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedCourse)
+        });
+
+        setCourse(updatedCourse);
+        setActiveChapterIndex(course.chapters.length); // Start at the first new chapter
+        showToast(`Added ${newChapters.length} new chapters!`, 'success');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to extend course', 'error');
+    } finally {
+      setIsExtending(false);
+    }
+  };
   const handleGenerateAudio = async () => {
     setIsGeneratingAudio(true);
     try {
@@ -191,45 +255,124 @@ export default function CourseView() {
       <div className="w-80 border-r border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 flex flex-col">
         <div className="p-6 border-b border-gray-200 dark:border-gray-800">
           <h2 className="font-bold text-lg text-gray-900 dark:text-white leading-tight">{course.title}</h2>
-          <div className="mt-4 flex items-center">
-            <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-              <div className="bg-indigo-600 h-2 rounded-full" style={{ width: `${Math.round((activeChapterIndex / course.chapters.length) * 100)}%` }}></div>
+          <div className="mt-4">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Progress</span>
+              <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">{Math.round((activeChapterIndex / course.chapters.length) * 100)}%</span>
             </div>
-            <span className="ml-3 text-xs font-medium text-gray-500 dark:text-gray-400">{Math.round((activeChapterIndex / course.chapters.length) * 100)}%</span>
+            <div className="flex h-1.5 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden">
+              {(() => {
+                const batches: Record<number, any[]> = {};
+                course.chapters.forEach((chapter: any, index: number) => {
+                  const bIdx = chapter.batchIndex || 0;
+                  if (!batches[bIdx]) batches[bIdx] = [];
+                  batches[bIdx].push(index);
+                });
+
+                return Object.entries(batches).sort(([a], [b]) => Number(a) - Number(b)).map(([batchIdx, chapterIndices], idx) => {
+                  const batchSize = chapterIndices.length;
+                  const totalSize = course.chapters.length;
+                  const width = (batchSize / totalSize) * 100;
+                  
+                  const completedInBatch = chapterIndices.filter(i => i < activeChapterIndex).length;
+                  let progressInBatch = (completedInBatch / batchSize) * 100;
+                  
+                  if (activeChapterIndex > Math.max(...chapterIndices)) {
+                    progressInBatch = 100;
+                  }
+
+                  return (
+                    <div 
+                      key={batchIdx} 
+                      className="h-full relative border-r border-white/20 dark:border-black/20 last:border-r-0" 
+                      style={{ width: `${width}%` }}
+                    >
+                      <div 
+                        className={`h-full transition-all duration-500 ${idx % 2 === 0 ? 'bg-indigo-600' : 'bg-indigo-400'}`}
+                        style={{ width: `${progressInBatch}%` }}
+                      ></div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Course Content</h3>
-          <ul className="space-y-2">
-            {course.chapters.map((chapter: any, index: number) => (
-              <li key={chapter.id || index}>
-                <button 
-                  onClick={() => {
-                    setActiveChapterIndex(index);
-                    setActiveTab('learn');
-                    setQuizAnswers({});
-                    setQuizSubmitted(false);
-                  }}
-                  className={`w-full text-left px-3 py-3 rounded-lg flex items-start ${
-                  index === activeChapterIndex ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-900/40' : 'hover:bg-gray-100 dark:hover:bg-gray-800'
-                }`}>
-                  <div className="mt-0.5 mr-3 flex-shrink-0">
-                    {index < activeChapterIndex ? (
-                      <CheckCircle className="w-5 h-5 text-green-500" />
-                    ) : index === activeChapterIndex ? (
-                      <div className="w-5 h-5 rounded-full border-2 border-indigo-500 flex items-center justify-center">
-                        <div className="w-2 h-2 bg-indigo-500 rounded-full"></div>
-                      </div>
-                    ) : (
-                      <div className="w-5 h-5 rounded-full border-2 border-gray-300 dark:border-gray-600"></div>
-                    )}
+          <ul className="space-y-6">
+            <li>
+              <button 
+                onClick={() => {
+                  setActiveChapterIndex(-1);
+                  setActiveTab('learn');
+                }}
+                className={`w-full text-left px-3 py-3 rounded-lg flex items-start ${
+                activeChapterIndex === -1 ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-900/40' : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+              }`}>
+                <div className="mt-0.5 mr-3 flex-shrink-0">
+                  <HelpCircle className={`w-5 h-5 ${activeChapterIndex === -1 ? 'text-indigo-500' : 'text-gray-400'}`} />
+                </div>
+                <span className={`text-sm ${activeChapterIndex === -1 ? 'font-medium text-indigo-900 dark:text-indigo-100' : 'text-gray-700 dark:text-gray-300'}`}>
+                  Course Overview
+                </span>
+              </button>
+            </li>
+            
+            {/* Grouped Chapters */}
+            {(() => {
+              const batches: Record<number, any[]> = {};
+              course.chapters.forEach((chapter: any, index: number) => {
+                const bIdx = chapter.batchIndex || 0;
+                if (!batches[bIdx]) batches[bIdx] = [];
+                batches[bIdx].push({ ...chapter, originalIndex: index });
+              });
+
+              return Object.entries(batches).sort(([a], [b]) => Number(a) - Number(b)).map(([batchIdx, chapters]) => (
+                <li key={batchIdx} className="space-y-2">
+                  <div className="flex items-center px-3 mb-2">
+                    <div className="h-px flex-1 bg-gray-200 dark:bg-gray-800"></div>
+                    <span className="px-2 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+                      {batchIdx === '0' ? 'Initial Content' : `Extension ${batchIdx}`}
+                    </span>
+                    <div className="h-px flex-1 bg-gray-200 dark:bg-gray-800"></div>
                   </div>
-                  <span className={`text-sm ${index === activeChapterIndex ? 'font-medium text-indigo-900 dark:text-indigo-100' : 'text-gray-700 dark:text-gray-300'}`}>
-                    {chapter.title}
-                  </span>
-                </button>
-              </li>
-            ))}
+                  <ul className="space-y-1">
+                    {chapters.map((chapter) => (
+                      <li key={chapter.id || chapter.originalIndex}>
+                        <button 
+                          onClick={() => {
+                            setActiveChapterIndex(chapter.originalIndex);
+                            setActiveTab('learn');
+                            setQuizAnswers({});
+                            setQuizSubmitted(false);
+                          }}
+                          className={`w-full text-left px-3 py-3 rounded-lg flex items-start transition-all ${
+                          chapter.originalIndex === activeChapterIndex 
+                            ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-900/40 shadow-sm' 
+                            : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                        }`}>
+                          <div className="mt-0.5 mr-3 flex-shrink-0">
+                            {chapter.originalIndex < activeChapterIndex ? (
+                              <CheckCircle className="w-5 h-5 text-green-500" />
+                            ) : chapter.originalIndex === activeChapterIndex ? (
+                              <div className="w-5 h-5 rounded-full border-2 border-indigo-500 flex items-center justify-center">
+                                <div className="w-2 h-2 bg-indigo-500 rounded-full"></div>
+                              </div>
+                            ) : (
+                              <div className="w-5 h-5 rounded-full border-2 border-gray-300 dark:border-gray-600"></div>
+                            )}
+                          </div>
+                          <span className={`text-sm leading-tight ${chapter.originalIndex === activeChapterIndex ? 'font-bold text-indigo-900 dark:text-indigo-100' : 'text-gray-700 dark:text-gray-300'}`}>
+                            {chapter.title}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ));
+            })()}
           </ul>
         </div>
       </div>
@@ -284,108 +427,268 @@ export default function CourseView() {
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-8 bg-white dark:bg-gray-900">
           <div className="max-w-4xl mx-auto">
-            {activeTab === 'learn' ? (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                <div className="lg:col-span-7 prose prose-indigo dark:prose-invert max-w-none">
-                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">{currentChapter?.title}</h1>
-                  <div className="text-gray-800 dark:text-gray-200 leading-relaxed">
-                    <Markdown>{currentChapter?.content || 'No content available.'}</Markdown>
+            {activeChapterIndex === -1 ? (
+              <div className="space-y-12">
+                <div className="text-center space-y-4">
+                  <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">{course.title}</h1>
+                  <p className="text-xl text-gray-600 dark:text-gray-400 max-w-2xl mx-auto leading-relaxed">
+                    {course.description || "Welcome to this comprehensive learning experience. This course is designed to guide you through key concepts with interactive content and knowledge checks."}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="p-6 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/30">
+                    <h3 className="text-lg font-bold text-indigo-900 dark:text-indigo-100 mb-2">Total Lessons</h3>
+                    <p className="text-3xl font-black text-indigo-600 dark:text-indigo-400">{course.chapters.length}</p>
+                    <p className="text-sm text-indigo-700 dark:text-indigo-300 mt-1">Structured modules</p>
+                  </div>
+                  <div className="p-6 bg-green-50 dark:bg-green-900/20 rounded-2xl border border-green-100 dark:border-green-900/30">
+                    <h3 className="text-lg font-bold text-green-900 dark:text-green-100 mb-2">Quizzes</h3>
+                    <p className="text-3xl font-black text-green-600 dark:text-green-400">
+                      {course.chapters.filter((c: any) => c.quiz && c.quiz.length > 0).length}
+                    </p>
+                    <p className="text-sm text-green-700 dark:text-green-300 mt-1">Knowledge checks</p>
+                  </div>
+                  <div className="p-6 bg-amber-50 dark:bg-amber-900/20 rounded-2xl border border-amber-100 dark:border-amber-900/30">
+                    <h3 className="text-lg font-bold text-amber-900 dark:text-amber-100 mb-2">Est. Time</h3>
+                    <p className="text-3xl font-black text-amber-600 dark:text-amber-400">{course.chapters.length * 10} min</p>
+                    <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">To completion</p>
                   </div>
                 </div>
-                
-                <div className="lg:col-span-5 space-y-6">
-                  {/* Visual Representation Section */}
-                  <div className="bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-                    <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-white dark:bg-gray-800">
-                      <div className="flex items-center text-sm font-semibold text-gray-700 dark:text-gray-300">
-                        {currentChapter?.visualMetadata?.type === 'chart' ? <BarChart3 className="w-4 h-4 mr-2 text-indigo-500" /> : <ImageIcon className="w-4 h-4 mr-2 text-indigo-500" />}
-                        Visual Representation
+
+                <div className="space-y-8">
+                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">What you'll learn</h2>
+                  <div className="space-y-10">
+                    {(() => {
+                      const batches: Record<number, any[]> = {};
+                      course.chapters.forEach((chapter: any, index: number) => {
+                        const bIdx = chapter.batchIndex || 0;
+                        if (!batches[bIdx]) batches[bIdx] = [];
+                        batches[bIdx].push({ ...chapter, originalIndex: index });
+                      });
+
+                      return Object.entries(batches).sort(([a], [b]) => Number(a) - Number(b)).map(([batchIdx, chapters]) => (
+                        <div key={batchIdx} className="space-y-4">
+                          <div className="flex items-center space-x-4">
+                            <span className="px-3 py-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold uppercase tracking-widest rounded-full">
+                              {batchIdx === '0' ? 'Foundation' : `Extension Pack ${batchIdx}`}
+                            </span>
+                            <div className="h-px flex-1 bg-gray-100 dark:bg-gray-800"></div>
+                          </div>
+                          <div className="grid grid-cols-1 gap-4">
+                            {chapters.map((chapter) => (
+                              <div key={chapter.id || chapter.originalIndex} className="flex items-start p-5 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-900/50 transition-colors group">
+                                <div className="w-10 h-10 rounded-xl bg-white dark:bg-gray-900 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-sm mr-4 flex-shrink-0 shadow-sm group-hover:scale-110 transition-transform">
+                                  {chapter.originalIndex + 1}
+                                </div>
+                                <div>
+                                  <h4 className="font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{chapter.title}</h4>
+                                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
+                                    {chapter.content.substring(0, 150).replace(/[#*`]/g, '')}...
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+
+                <div className="flex justify-center pt-8">
+                  <button 
+                    onClick={() => setActiveChapterIndex(0)}
+                    className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold text-lg shadow-lg shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all transform hover:scale-105"
+                  >
+                    Start Learning Now
+                  </button>
+                </div>
+              </div>
+            ) : activeChapterIndex === course.chapters.length ? (
+              <div className="max-w-2xl mx-auto text-center py-12 space-y-8">
+                <div className="inline-flex items-center justify-center w-24 h-24 bg-green-100 dark:bg-green-900/30 rounded-full mb-4">
+                  <CheckCircle className="w-12 h-12 text-green-600 dark:text-green-400" />
+                </div>
+                <div className="space-y-4">
+                  <h1 className="text-4xl font-black text-gray-900 dark:text-white">Course Completed!</h1>
+                  <p className="text-xl text-gray-600 dark:text-gray-400">
+                    Congratulations! You've finished all the generated lessons for this course.
+                  </p>
+                </div>
+
+                <div className="bg-indigo-50 dark:bg-indigo-900/20 p-8 rounded-3xl border border-indigo-100 dark:border-indigo-900/30 space-y-6">
+                  <div className="space-y-2">
+                    <h3 className="text-xl font-bold text-indigo-900 dark:text-indigo-100">Want to learn more?</h3>
+                    <p className="text-indigo-700 dark:text-indigo-300">
+                      There's still more content in your source material that hasn't been covered yet. I can generate additional chapters for you.
+                    </p>
+                  </div>
+                  <button 
+                    onClick={handleExtendCourse}
+                    disabled={isExtending}
+                    className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold text-lg shadow-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center"
+                  >
+                    {isExtending ? (
+                      <>
+                        <Loader2 className="w-6 h-6 mr-2 animate-spin" />
+                        Generating New Chapters...
+                      </>
+                    ) : (
+                      <>
+                        <Wand2 className="w-6 h-6 mr-2" />
+                        Extend Course with More Content
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="flex justify-center space-x-4 pt-4">
+                  <button 
+                    onClick={() => navigate('/')}
+                    className="px-6 py-3 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700"
+                  >
+                    Back to Dashboard
+                  </button>
+                </div>
+              </div>
+            ) : activeTab === 'learn' ? (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                {(() => {
+                  const hasSummary = currentChapter?.content?.split('\n').some((l: string) => l.trim().startsWith('- '));
+                  const hasVisual = currentChapter?.visualMetadata?.type === 'chart' || isGeneratingVisual || visualUrl;
+                  const showSidebar = hasVisual || hasSummary;
+
+                  return (
+                    <>
+                      <div className={`${showSidebar ? 'lg:col-span-7' : 'lg:col-span-12'} prose prose-indigo dark:prose-invert max-w-none dyslexic-friendly`}>
+                        <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">{currentChapter?.title}</h1>
+                        <div className="text-gray-800 dark:text-gray-200 leading-relaxed">
+                          <Markdown>{currentChapter?.content || 'No content available.'}</Markdown>
+                        </div>
                       </div>
-                    </div>
-                    
-                    <div className="p-4 min-h-[300px] flex items-center justify-center">
-                      {currentChapter?.visualMetadata?.type === 'chart' && currentChapter.visualMetadata.chartData ? (
-                        <div className="w-full h-[300px]">
-                          <ResponsiveContainer width="100%" height="100%">
-                            {currentChapter.visualMetadata.chartType === 'pie' ? (
-                              <PieChart>
-                                <Pie 
-                                  data={currentChapter.visualMetadata.chartData} 
-                                  dataKey="value" 
-                                  nameKey="name" 
-                                  cx="50%" 
-                                  cy="50%" 
-                                  outerRadius={80} 
-                                  label
-                                >
-                                  {currentChapter.visualMetadata.chartData.map((_: any, index: number) => (
-                                    <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#6366f1' : '#818cf8'} />
-                                  ))}
-                                </Pie>
-                                <Tooltip />
-                              </PieChart>
-                            ) : currentChapter.visualMetadata.chartType === 'line' ? (
-                              <LineChart data={currentChapter.visualMetadata.chartData}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={12} />
-                                <YAxis axisLine={false} tickLine={false} fontSize={12} />
-                                <Tooltip 
-                                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Line type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={3} dot={{ r: 4, fill: '#6366f1' }} activeDot={{ r: 6 }} />
-                              </LineChart>
-                            ) : (
-                              <BarChart data={currentChapter.visualMetadata.chartData}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={12} />
-                                <YAxis axisLine={false} tickLine={false} fontSize={12} />
-                                <Tooltip 
-                                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                                  cursor={{ fill: 'rgba(99, 102, 241, 0.1)' }}
-                                />
-                                <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                                  {currentChapter.visualMetadata.chartData.map((_: any, index: number) => (
-                                    <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#6366f1' : '#818cf8'} />
-                                  ))}
-                                </Bar>
-                              </BarChart>
-                            )}
-                          </ResponsiveContainer>
-                        </div>
-                      ) : isGeneratingVisual ? (
-                        <div className="flex flex-col items-center text-gray-400">
-                          <Loader2 className="w-8 h-8 animate-spin mb-2" />
-                          <span className="text-xs">Generating visual...</span>
-                        </div>
-                      ) : visualUrl ? (
-                        <img 
-                          src={visualUrl} 
-                          alt="AI Generated Visual" 
-                          className="w-full h-auto rounded-lg shadow-sm object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        <div className="text-center p-8">
-                          <ImageIcon className="w-12 h-12 text-gray-200 dark:text-gray-700 mx-auto mb-3" />
-                          <p className="text-sm text-gray-400">No visual representation available for this chapter.</p>
+                      
+                      {showSidebar && (
+                        <div className="lg:col-span-5 space-y-6">
+                          {/* Visual Representation Section */}
+                          {hasVisual && (
+                            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                              <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-white dark:bg-gray-800">
+                                <div className="flex items-center text-sm font-semibold text-gray-700 dark:text-gray-300">
+                                  {currentChapter?.visualMetadata?.type === 'chart' ? <BarChart3 className="w-4 h-4 mr-2 text-indigo-500" /> : <ImageIcon className="w-4 h-4 mr-2 text-indigo-500" />}
+                                  Visual Representation
+                                </div>
+                              </div>
+                              
+                              <div className="p-4 min-h-[300px] flex items-center justify-center">
+                                {currentChapter?.visualMetadata?.type === 'chart' && currentChapter.visualMetadata.chartData ? (
+                                  <div className="w-full h-[300px]">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                      {currentChapter.visualMetadata.chartType === 'pie' ? (
+                                        <PieChart>
+                                          <Pie 
+                                            data={currentChapter.visualMetadata.chartData} 
+                                            dataKey="value" 
+                                            nameKey="name" 
+                                            cx="50%" 
+                                            cy="50%" 
+                                            outerRadius={80} 
+                                            label
+                                          >
+                                            {currentChapter.visualMetadata.chartData.map((_: any, index: number) => (
+                                              <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#6366f1' : '#818cf8'} />
+                                            ))}
+                                          </Pie>
+                                          <Tooltip />
+                                        </PieChart>
+                                      ) : currentChapter.visualMetadata.chartType === 'line' ? (
+                                        <LineChart data={currentChapter.visualMetadata.chartData}>
+                                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                          <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={12} />
+                                          <YAxis axisLine={false} tickLine={false} fontSize={12} />
+                                          <Tooltip 
+                                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                                          />
+                                          <Line type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={3} dot={{ r: 4, fill: '#6366f1' }} activeDot={{ r: 6 }} />
+                                        </LineChart>
+                                      ) : (
+                                        <BarChart data={currentChapter.visualMetadata.chartData}>
+                                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                          <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={12} />
+                                          <YAxis axisLine={false} tickLine={false} fontSize={12} />
+                                          <Tooltip 
+                                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                                            cursor={{ fill: 'rgba(99, 102, 241, 0.1)' }}
+                                          />
+                                          <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                                            {currentChapter.visualMetadata.chartData.map((_: any, index: number) => (
+                                              <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#6366f1' : '#818cf8'} />
+                                            ))}
+                                          </Bar>
+                                        </BarChart>
+                                      )}
+                                    </ResponsiveContainer>
+                                  </div>
+                                ) : isGeneratingVisual ? (
+                                  <div className="flex flex-col items-center text-gray-400">
+                                    <Loader2 className="w-8 h-8 animate-spin mb-2" />
+                                    <span className="text-xs">Generating visual...</span>
+                                  </div>
+                                ) : visualUrl ? (
+                                  <img 
+                                    src={visualUrl} 
+                                    alt="AI Generated Visual" 
+                                    className="w-full h-auto rounded-lg shadow-sm object-cover"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : null}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Learning Outcome Box */}
+                          <div className="bg-green-50 dark:bg-green-900/10 rounded-2xl p-6 border border-green-100 dark:border-green-900/30">
+                            <h4 className="text-sm font-bold text-green-900 dark:text-green-100 uppercase tracking-wider mb-2 flex items-center">
+                              <CheckCircle className="w-4 h-4 mr-2" />
+                              Learning Outcome
+                            </h4>
+                            <p className="text-sm text-green-800 dark:text-green-200">
+                              By the end of this lesson, you will have mastered the core concepts of {currentChapter?.title} and be ready to apply them in practical scenarios.
+                            </p>
+                          </div>
+
+                          {/* Summary/Key Points Box */}
+                          {hasSummary && (
+                            <div className="bg-indigo-50 dark:bg-indigo-900/10 rounded-2xl p-6 border border-indigo-100 dark:border-indigo-900/30">
+                              <h4 className="text-sm font-bold text-indigo-900 dark:text-indigo-100 uppercase tracking-wider mb-4">Key Takeaways</h4>
+                              <ul className="space-y-3">
+                                {currentChapter?.content?.split('\n').filter((l: string) => l.trim().startsWith('- ')).slice(0, 4).map((point: string, i: number) => (
+                                  <li key={i} className="flex items-start text-sm text-indigo-800 dark:text-indigo-200">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 mr-3 flex-shrink-0"></div>
+                                    {point.replace('- ', '').trim()}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {/* What's Next Box */}
+                          {activeChapterIndex < course.chapters.length - 1 && (
+                            <div className="bg-amber-50 dark:bg-amber-900/10 rounded-2xl p-6 border border-amber-100 dark:border-amber-900/30">
+                              <h4 className="text-sm font-bold text-amber-900 dark:text-amber-100 uppercase tracking-wider mb-2 flex items-center">
+                                <ChevronRight className="w-4 h-4 mr-2" />
+                                What's Next?
+                              </h4>
+                              <p className="text-sm text-amber-800 dark:text-amber-200">
+                                Next up: <span className="font-bold">{course.chapters[activeChapterIndex + 1].title}</span>. We'll build upon what you've learned here.
+                              </p>
+                            </div>
+                          )}
                         </div>
                       )}
-                    </div>
-                  </div>
-
-                  {/* Summary/Key Points Box */}
-                  <div className="bg-indigo-50 dark:bg-indigo-900/10 rounded-2xl p-6 border border-indigo-100 dark:border-indigo-900/30">
-                    <h4 className="text-sm font-bold text-indigo-900 dark:text-indigo-100 uppercase tracking-wider mb-4">Key Takeaways</h4>
-                    <ul className="space-y-3">
-                      {currentChapter?.content?.split('\n').filter((l: string) => l.startsWith('- ')).slice(0, 4).map((point: string, i: number) => (
-                        <li key={i} className="flex items-start text-sm text-indigo-800 dark:text-indigo-200">
-                          <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 mr-3 flex-shrink-0"></div>
-                          {point.replace('- ', '')}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
+                    </>
+                  );
+                })()}
               </div>
             ) : (
               <div className="max-w-2xl mx-auto">
@@ -455,7 +758,7 @@ export default function CourseView() {
         <div className="border-t border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-900 flex justify-between items-center">
           <button 
             onClick={handlePrev}
-            disabled={activeChapterIndex === 0}
+            disabled={activeChapterIndex === -1}
             className="flex items-center text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white font-medium text-sm px-4 py-2 disabled:opacity-50"
           >
             <ChevronLeft className="w-5 h-5 mr-1" />
@@ -463,10 +766,10 @@ export default function CourseView() {
           </button>
           <button 
             onClick={handleNext}
-            disabled={activeChapterIndex === course.chapters.length - 1}
+            disabled={activeChapterIndex === course.chapters.length}
             className="flex items-center text-white bg-indigo-600 hover:bg-indigo-700 font-medium text-sm px-6 py-2 rounded-lg shadow-sm disabled:opacity-50"
           >
-            Next
+            {activeChapterIndex === course.chapters.length - 1 ? 'Finish' : 'Next'}
             <ChevronRight className="w-5 h-5 ml-1" />
           </button>
         </div>

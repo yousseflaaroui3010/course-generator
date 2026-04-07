@@ -75,12 +75,26 @@ async function startServer() {
   });
 
   app.get('/api/dashboard', (req, res) => {
-    const courses = Object.values(db.courses).map((c: any) => ({
-      id: c.id,
-      title: c.title,
-      progress: Math.floor(Math.random() * 100),
-      lastAccessed: 'Just now'
-    }));
+    const courses = Object.values(db.courses).map((c: any) => {
+      const totalChapters = c.chapters?.length || 0;
+      const completedCount = c.completedChapters?.length || 0;
+      const progress = totalChapters > 0 ? Math.round((completedCount / totalChapters) * 100) : 0;
+      
+      // Group chapters by batch for the dashboard to show "Extension" info
+      const batches: Record<number, number> = {};
+      c.chapters?.forEach((ch: any) => {
+        const bIdx = ch.batchIndex || 0;
+        batches[bIdx] = (batches[bIdx] || 0) + 1;
+      });
+
+      return {
+        id: c.id,
+        title: c.title,
+        progress,
+        batchCount: Object.keys(batches).length,
+        lastAccessed: 'Just now'
+      };
+    });
     const videos = Object.values(db.videos).map((v: any) => ({
       id: v.id,
       title: v.title,
@@ -101,6 +115,9 @@ async function startServer() {
         const dataBuffer = fs.readFileSync(req.file.path);
         const data = await pdfParse(dataBuffer);
         text = data.text;
+      } else if (req.file.mimetype.startsWith('image/')) {
+        const dataBuffer = fs.readFileSync(req.file.path);
+        text = `IMAGE_DATA:${req.file.mimetype}:${dataBuffer.toString('base64')}`;
       } else {
         text = fs.readFileSync(req.file.path, 'utf-8');
       }
@@ -152,6 +169,19 @@ async function startServer() {
     const course = db.courses[req.params.id];
     if (!course) return res.status(404).json({ error: 'Course not found' });
     res.json(course);
+  });
+
+  app.post('/api/courses/:id/progress', (req, res) => {
+    const { chapterIndex } = req.body;
+    const course = db.courses[req.params.id];
+    if (!course) return res.status(404).json({ error: 'Course not found' });
+    
+    if (!course.completedChapters) course.completedChapters = [];
+    if (!course.completedChapters.includes(chapterIndex)) {
+      course.completedChapters.push(chapterIndex);
+    }
+    
+    res.json({ message: 'Progress updated', completedChapters: course.completedChapters });
   });
 
   app.delete('/api/courses/:id', (req, res) => {

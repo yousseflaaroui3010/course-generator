@@ -17,12 +17,12 @@ export default function Layout() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
             <div className="flex">
-              <div className="flex-shrink-0 flex items-center">
+              <Link to="/" className="flex-shrink-0 flex items-center hover:opacity-80 transition-opacity">
                 <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center mr-3">
                   <BookOpen className="w-5 h-5 text-white" />
                 </div>
                 <span className="font-bold text-xl text-gray-900 dark:text-white tracking-tight">LuminaLearn</span>
-              </div>
+              </Link>
               <nav className="hidden sm:ml-8 sm:flex sm:space-x-8">
                 {navItems.map((item) => {
                   const Icon = item.icon;

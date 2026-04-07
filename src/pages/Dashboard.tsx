@@ -107,24 +107,51 @@ export default function Dashboard() {
                 <li key={course.id} className="p-6 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group">
                   <Link to={`/course/${course.id}`} className="block relative">
                     <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-md font-medium text-gray-900 dark:text-white">{course.title}</h3>
+                      <div className="flex items-center space-x-2">
+                        <h3 className="text-md font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 transition-colors">{course.title}</h3>
+                        {course.batchCount > 1 && (
+                          <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 text-[10px] font-black uppercase tracking-widest rounded-md border border-amber-200 dark:border-amber-900/50">
+                            Extended
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center space-x-3">
-                        <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center">
+                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400 flex items-center">
                           <Clock className="w-3 h-3 mr-1" />
                           {course.lastAccessed}
                         </span>
                         <button 
                           onClick={(e) => handleDeleteCourse(course.id, e)}
-                          className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition-all"
+                          className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
-                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-4">
-                      <div className="bg-indigo-600 h-2.5 rounded-full" style={{ width: `${course.progress}%` }}></div>
+                    
+                    <div className="flex items-center space-x-3">
+                      <div className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-full h-2 overflow-hidden flex">
+                        {course.batchCount > 1 ? (
+                          // Segmented bar for extended courses
+                          Array.from({ length: course.batchCount }).map((_, i) => (
+                            <div 
+                              key={i} 
+                              className={`h-full border-r border-white/20 dark:border-black/20 last:border-r-0 ${i % 2 === 0 ? 'bg-indigo-600' : 'bg-indigo-400'}`}
+                              style={{ width: `${100 / course.batchCount}%`, opacity: course.progress >= ((i + 1) / course.batchCount * 100) ? 1 : 0.3 }}
+                            ></div>
+                          ))
+                        ) : (
+                          <div className="bg-indigo-600 h-full transition-all duration-500" style={{ width: `${course.progress}%` }}></div>
+                        )}
+                      </div>
+                      <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 min-w-[3ch]">{course.progress}%</span>
                     </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">{course.progress}% complete</p>
+                    
+                    {course.batchCount > 1 && (
+                      <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2 font-medium">
+                        Contains {course.batchCount} content packs
+                      </p>
+                    )}
                   </Link>
                 </li>
               ))

@@ -9,6 +9,7 @@ export default function CourseBuilder() {
   const { showToast } = useToast();
   const [step, setStep] = useState(1);
   const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [fileId, setFileId] = useState<string>('');
   const [isUploading, setIsUploading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -22,6 +23,18 @@ export default function CourseBuilder() {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
       setFile(selectedFile);
+      
+      // Create preview for images
+      if (selectedFile.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setPreviewUrl(reader.result as string);
+        };
+        reader.readAsDataURL(selectedFile);
+      } else {
+        setPreviewUrl(null);
+      }
+
       setIsUploading(true);
       
       const formData = new FormData();
@@ -81,11 +94,14 @@ export default function CourseBuilder() {
         throw new Error('AI failed to generate a valid course structure. Please try again.');
       }
 
+      // Add batch index to initial chapters
+      courseData.chapters = courseData.chapters.map((c: any) => ({ ...c, batchIndex: 0 }));
+
       // 3. Save the generated course to the backend
       const saveRes = await fetch('/api/courses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(courseData)
+        body: JSON.stringify({ ...courseData, fileId })
       });
       
       const saveResult = await saveRes.json();
@@ -147,19 +163,21 @@ export default function CourseBuilder() {
               <input 
                 type="file" 
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
-                accept=".pdf,.txt,.md"
+                accept=".pdf,.txt,.md,image/*"
                 onChange={handleFileChange}
                 disabled={isUploading}
               />
               {isUploading ? (
                 <Loader2 className="mx-auto h-12 w-12 text-indigo-500 animate-spin" />
+              ) : previewUrl ? (
+                <img src={previewUrl} alt="Preview" className="mx-auto h-32 w-auto rounded-lg shadow-md object-cover" referrerPolicy="no-referrer" />
               ) : (
                 <Upload className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-600" />
               )}
               <h3 className="mt-4 text-lg font-medium text-gray-900 dark:text-white">
-                {isUploading ? 'Uploading...' : 'Upload a document'}
+                {isUploading ? 'Uploading...' : previewUrl ? 'Image Selected' : 'Upload a document or photo'}
               </h3>
-              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">PDF, Markdown, or Plain Text up to 50MB</p>
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">PDF, Markdown, Text, or Images (JPG, PNG)</p>
             </div>
           </div>
         )}
@@ -167,7 +185,11 @@ export default function CourseBuilder() {
         {step >= 2 && (
           <div className="space-y-6">
             <div className="flex items-center p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-100 dark:border-indigo-900/30">
-              <FileText className="w-8 h-8 text-indigo-600 dark:text-indigo-400 mr-4" />
+              {previewUrl ? (
+                <img src={previewUrl} alt="File preview" className="w-12 h-12 rounded object-cover mr-4" referrerPolicy="no-referrer" />
+              ) : (
+                <FileText className="w-8 h-8 text-indigo-600 dark:text-indigo-400 mr-4" />
+              )}
               <div>
                 <p className="font-medium text-indigo-900 dark:text-indigo-100">{file?.name}</p>
                 <p className="text-sm text-indigo-700 dark:text-indigo-300">{((file?.size || 0) / 1024 / 1024).toFixed(2)} MB</p>

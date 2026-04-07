@@ -107,8 +107,26 @@ export default function Settings() {
                             className="w-24 h-24 rounded-full object-cover border-4 border-gray-100 dark:border-gray-800"
                             referrerPolicy="no-referrer"
                           />
+                          <input
+                            type="file"
+                            id="avatar-upload"
+                            className="hidden"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  setProfile({ ...profile, avatar: reader.result as string });
+                                  showToast('Avatar updated locally', 'success');
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                          />
                           <button
                             type="button"
+                            onClick={() => document.getElementById('avatar-upload')?.click()}
                             className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             <Camera className="w-6 h-6 text-white" />
@@ -118,10 +136,18 @@ export default function Settings() {
                           <h3 className="font-medium text-gray-900 dark:text-white">Profile Picture</h3>
                           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">JPG, GIF or PNG. Max size of 2MB.</p>
                           <div className="mt-3 flex space-x-3">
-                            <button type="button" className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-500">
+                            <button 
+                              type="button" 
+                              onClick={() => document.getElementById('avatar-upload')?.click()}
+                              className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-500"
+                            >
                               Upload new
                             </button>
-                            <button type="button" className="text-sm font-medium text-red-600 dark:text-red-400 hover:text-red-500">
+                            <button 
+                              type="button" 
+                              onClick={() => setProfile({ ...profile, avatar: 'https://picsum.photos/seed/default/200/200' })}
+                              className="text-sm font-medium text-red-600 dark:text-red-400 hover:text-red-500"
+                            >
                               Remove
                             </button>
                           </div>
