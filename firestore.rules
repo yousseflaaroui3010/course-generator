@@ -1,0 +1,153 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (auth.uid)
+    // Fields: uid, email, displayName, photoURL, role, createdAt, preferences
+    //
+    // Collection: courses
+    // Document ID: courseId
+    // Fields: id, title, description, creatorId, fileId, chapters, createdAt
+    //
+    // Collection: progress (subcollection of users)
+    // Document ID: courseId
+    // Fields: courseId, userId, lastChapterIndex, completed, updatedAt
+    //
+    // Collection: videos
+    // Document ID: videoId
+    // Fields: id, title, creatorId, scenes, status, createdAt
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        ((request.auth.token.email == "yousseflaaroui1@gmail.com" && request.auth.token.email_verified == true) ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+    }
+
+    function isTeacher() {
+      return isAuthenticated() && 
+        (isAdmin() || 
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher'));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.uid is string &&
+             data.email is string &&
+             data.role in ['student', 'teacher', 'admin'];
+    }
+
+    function isValidCourse(data) {
+      return data.keys().hasAll(['title', 'creatorId']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.creatorId == request.auth.uid;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == 'student';
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == resource.data.role || isAdmin());
+
+      match /progress/{courseId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    match /courses/{courseId} {
+      allow read: if true;
+      allow create: if isTeacher() && isValidCourse(request.resource.data);
+      allow update: if (isTeacher() && resource.data.creatorId == request.auth.uid) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /videos/{videoId} {
+      allow read: if isAuthenticated();
+      allow create: if isTeacher();
+      allow update: if (isTeacher() && resource.data.creatorId == request.auth.uid) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /users/{userId}/subscriptions/{subId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isAdmin(); // Only admin (via webhook/server) should write subscriptions
+    }
+
+    match /users/{userId}/purchases/{purchaseId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isAdmin(); // Only admin should write purchases
+    }
+
+    match /assignments/{assignmentId} {
+      allow read: if isAuthenticated();
+      allow create: if isTeacher();
+      allow update: if isTeacher() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /submissions/{submissionId} {
+      allow read: if isAuthenticated(); // Allow peers to read for review
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if (isAuthenticated() && resource.data.userId == request.auth.uid) || isTeacher() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /peerReviews/{reviewId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.reviewerId == request.auth.uid;
+      allow update: if (isAuthenticated() && resource.data.reviewerId == request.auth.uid) || isTeacher() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /certificates/{certificateId} {
+      allow read: if isAuthenticated(); // Anyone can verify a certificate
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    match /users/{userId}/notes/{noteId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    match /learningPaths/{pathId} {
+      allow read: if true;
+      allow create: if isTeacher() || isAdmin();
+      allow update: if (isTeacher() && resource.data.creatorId == request.auth.uid) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /coupons/{couponId} {
+      allow read: if true;
+      allow create: if isTeacher() || isAdmin();
+      allow update: if (isTeacher() && resource.data.creatorId == request.auth.uid) || isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}

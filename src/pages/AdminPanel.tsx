@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Activity, Users, Database, ShieldAlert, Cpu, Trash2, RefreshCw } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, getDocs, query, writeBatch, doc } from 'firebase/firestore';
 import ConfirmationModal from '../components/ConfirmationModal';
 
 export default function AdminPanel() {
@@ -9,18 +11,21 @@ export default function AdminPanel() {
   const [isClearing, setIsClearing] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const fetchStats = () => {
-    fetch('/api/stats')
-      .then(async res => {
-        const text = await res.text();
-        try {
-          return JSON.parse(text);
-        } catch (e) {
-          throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
-        }
-      })
-      .then(data => setStatsData(data))
-      .catch(err => console.error(err));
+  const fetchStats = async () => {
+    try {
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const coursesSnap = await getDocs(collection(db, 'courses'));
+      const videosSnap = await getDocs(collection(db, 'videos'));
+      
+      setStatsData({
+        users: usersSnap.size,
+        courses: coursesSnap.size,
+        videos: videosSnap.size,
+        generations: coursesSnap.size + videosSnap.size
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, 'stats');
+    }
   };
 
   useEffect(() => {
@@ -30,16 +35,24 @@ export default function AdminPanel() {
   const handleClearAll = async () => {
     setIsClearing(true);
     try {
-      const res = await fetch('/api/admin/clear-all', { method: 'POST' });
-      if (res.ok) {
-        showToast('All data cleared', 'success');
-        fetchStats();
-      }
+      const batch = writeBatch(db);
+      
+      // Note: This is a simplified clear. In production, you'd use a cloud function for large deletions.
+      const coursesSnap = await getDocs(collection(db, 'courses'));
+      coursesSnap.forEach(d => batch.delete(d.ref));
+      
+      const videosSnap = await getDocs(collection(db, 'videos'));
+      videosSnap.forEach(d => batch.delete(d.ref));
+      
+      await batch.commit();
+      showToast('Courses and videos cleared', 'success');
+      fetchStats();
     } catch (err) {
-      console.error(err);
+      handleFirestoreError(err, OperationType.DELETE, 'all');
       showToast('Failed to clear data', 'error');
     } finally {
       setIsClearing(false);
+      setIsModalOpen(false);
     }
   };
 

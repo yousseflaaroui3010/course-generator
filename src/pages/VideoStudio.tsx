@@ -2,10 +2,14 @@ import { useState } from 'react';
 import { Film, Wand2, Play, Download, Settings2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useToast } from '../components/Toast';
+import { useAuth } from '../contexts/AuthContext';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, addDoc } from 'firebase/firestore';
 import { geminiService } from '../services/gemini';
 
 export default function VideoStudio() {
   const { showToast } = useToast();
+  const { user } = useAuth();
   const [prompt, setPrompt] = useState('');
   const [style, setStyle] = useState('Minimalist Vector');
   const [voice, setVoice] = useState('Professional (Female)');
@@ -27,23 +31,23 @@ export default function VideoStudio() {
         throw new Error('AI failed to generate a valid video script. Please try again.');
       }
 
-      // 2. Save the generated video to the backend
-      const saveRes = await fetch('/api/videos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(videoData)
+      // 2. Save the generated video to Firestore
+      const docRef = await addDoc(collection(db, 'videos'), {
+        ...videoData,
+        creatorId: user?.uid,
+        status: 'generated',
+        createdAt: new Date().toISOString()
       });
       
-      const saveResult = await saveRes.json();
-
-      if (saveResult.videoId) {
-        setVideoData(videoData);
+      if (docRef.id) {
+        setVideoData({ id: docRef.id, ...videoData });
         showToast('Video script generated!', 'success');
       } else {
         showToast('Failed to save video script', 'error');
       }
     } catch (err) {
       console.error(err);
+      handleFirestoreError(err, OperationType.CREATE, 'videos');
       showToast('Error generating video', 'error');
     } finally {
       setIsGenerating(false);

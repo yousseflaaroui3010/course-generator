@@ -1,14 +1,26 @@
-import { useState } from 'react';
-import { User, Bell, Shield, Globe, Moon, Sun, Monitor, Save, Loader2, Camera, Mail, Lock, Settings as SettingsIcon } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { User, Bell, Shield, Globe, Moon, Sun, Monitor, Save, Loader2, Camera, Mail, Lock, Settings as SettingsIcon, CreditCard, Sparkles } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useTheme } from '../components/ThemeProvider';
+import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
+import { useSearchParams, Link } from 'react-router-dom';
+import { CheckCircle2 } from 'lucide-react';
 
 export default function Settings() {
   const { showToast } = useToast();
   const { theme, setTheme } = useTheme();
+  const { user, profile: userProfile } = useAuth();
+  const [searchParams] = useSearchParams();
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('profile');
+
+  useEffect(() => {
+    if (searchParams.get('session_id')) {
+      showToast('Subscription successful! Welcome to Pro.', 'success');
+      setActiveTab('subscription');
+    }
+  }, [searchParams]);
 
   // Profile State
   const [profile, setProfile] = useState({
@@ -47,6 +59,7 @@ export default function Settings() {
 
   const tabs = [
     { id: 'profile', label: 'Profile', icon: User },
+    { id: 'subscription', label: 'Subscription', icon: CreditCard },
     { id: 'preferences', label: 'Preferences', icon: SettingsIcon },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'security', label: 'Security', icon: Shield },
@@ -96,109 +109,180 @@ export default function Settings() {
                   exit={{ opacity: 0, x: -20 }}
                   className="space-y-8"
                 >
-                  <div>
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Public Profile</h2>
-                    <form onSubmit={handleSaveProfile} className="space-y-6">
-                      <div className="flex items-center space-x-6">
-                        <div className="relative group">
-                          <img
-                            src={profile.avatar}
-                            alt="Avatar"
-                            className="w-24 h-24 rounded-full object-cover border-4 border-gray-100 dark:border-gray-800"
-                            referrerPolicy="no-referrer"
-                          />
-                          <input
-                            type="file"
-                            id="avatar-upload"
-                            className="hidden"
-                            accept="image/*"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                const reader = new FileReader();
-                                reader.onloadend = () => {
-                                  setProfile({ ...profile, avatar: reader.result as string });
-                                  showToast('Avatar updated locally', 'success');
-                                };
-                                reader.readAsDataURL(file);
-                              }
-                            }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => document.getElementById('avatar-upload')?.click()}
-                            className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            <Camera className="w-6 h-6 text-white" />
-                          </button>
-                        </div>
-                        <div>
-                          <h3 className="font-medium text-gray-900 dark:text-white">Profile Picture</h3>
-                          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">JPG, GIF or PNG. Max size of 2MB.</p>
-                          <div className="mt-3 flex space-x-3">
-                            <button 
-                              type="button" 
-                              onClick={() => document.getElementById('avatar-upload')?.click()}
-                              className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-500"
-                            >
-                              Upload new
-                            </button>
-                            <button 
-                              type="button" 
-                              onClick={() => setProfile({ ...profile, avatar: 'https://picsum.photos/seed/default/200/200' })}
-                              className="text-sm font-medium text-red-600 dark:text-red-400 hover:text-red-500"
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-6">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Display Name</label>
-                          <input
-                            type="text"
-                            value={profile.name}
-                            onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-                            className="w-full border-gray-300 dark:border-gray-700 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2.5 border dark:bg-gray-800 dark:text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email Address</label>
-                          <div className="relative">
-                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                            <input
-                              type="email"
-                              value={profile.email}
-                              disabled
-                              className="w-full pl-10 border-gray-300 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50 text-gray-500 dark:text-gray-400 p-2.5 border cursor-not-allowed"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Bio</label>
-                          <textarea
-                            rows={4}
-                            value={profile.bio}
-                            onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
-                            className="w-full border-gray-300 dark:border-gray-700 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2.5 border dark:bg-gray-800 dark:text-white"
-                            placeholder="Tell us a bit about yourself..."
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex justify-end pt-4">
+                  <form onSubmit={handleSaveProfile} className="space-y-6">
+                    <div className="flex items-center space-x-6">
+                      <div className="relative group">
+                        <img
+                          src={profile.avatar}
+                          alt="Avatar"
+                          className="w-24 h-24 rounded-full object-cover border-4 border-gray-100 dark:border-gray-800"
+                          referrerPolicy="no-referrer"
+                        />
+                        <input
+                          type="file"
+                          id="avatar-upload"
+                          className="hidden"
+                          accept="image/*"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                setProfile({ ...profile, avatar: reader.result as string });
+                                showToast('Avatar updated locally', 'success');
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
                         <button
-                          type="submit"
-                          disabled={isSaving}
-                          className="inline-flex items-center px-6 py-2.5 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                          type="button"
+                          onClick={() => document.getElementById('avatar-upload')?.click()}
+                          className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                         >
-                          {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                          Save Changes
+                          <Camera className="w-6 h-6 text-white" />
                         </button>
                       </div>
-                    </form>
+                      <div>
+                        <h3 className="font-medium text-gray-900 dark:text-white">Profile Picture</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">JPG, GIF or PNG. Max size of 2MB.</p>
+                        <div className="mt-3 flex space-x-3">
+                          <button 
+                            type="button" 
+                            onClick={() => document.getElementById('avatar-upload')?.click()}
+                            className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-500"
+                          >
+                            Upload new
+                          </button>
+                          <button 
+                            type="button" 
+                            onClick={() => setProfile({ ...profile, avatar: 'https://picsum.photos/seed/default/200/200' })}
+                            className="text-sm font-medium text-red-600 dark:text-red-400 hover:text-red-500"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Display Name</label>
+                        <input
+                          type="text"
+                          value={profile.name}
+                          onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+                          className="w-full border-gray-300 dark:border-gray-700 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2.5 border dark:bg-gray-800 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email Address</label>
+                        <div className="relative">
+                          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                          <input
+                            type="email"
+                            value={profile.email}
+                            disabled
+                            className="w-full pl-10 border-gray-300 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50 text-gray-500 dark:text-gray-400 p-2.5 border cursor-not-allowed"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Bio</label>
+                        <textarea
+                          rows={4}
+                          value={profile.bio}
+                          onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
+                          className="w-full border-gray-300 dark:border-gray-700 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2.5 border dark:bg-gray-800 dark:text-white"
+                          placeholder="Tell us a bit about yourself..."
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end pt-4">
+                      <button
+                        type="submit"
+                        disabled={isSaving}
+                        className="inline-flex items-center px-6 py-2.5 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                      >
+                        {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                        Save Changes
+                      </button>
+                    </div>
+                  </form>
+                </motion.div>
+              )}
+
+              {activeTab === 'subscription' && (
+                <motion.div
+                  key="subscription"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="space-y-8"
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Subscription Plan</h2>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">Manage your billing and subscription details.</p>
+                    </div>
+                    <div className={`px-3 py-1 rounded-full text-xs font-bold ${
+                      userProfile?.subscription?.status === 'active' 
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' 
+                        : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400'
+                    }`}>
+                      {userProfile?.subscription?.status === 'active' ? 'Active' : 'Free Plan'}
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-50 dark:bg-gray-800/50 rounded-2xl p-6 border border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center justify-between mb-6">
+                      <div className="flex items-center">
+                        <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center mr-4">
+                          <Sparkles className="w-6 h-6 text-indigo-600" />
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-gray-900 dark:text-white">
+                            {userProfile?.subscription?.planId === 'pro_monthly' ? 'Pro Monthly' : 'Free Tier'}
+                          </h3>
+                          <p className="text-sm text-gray-500 dark:text-gray-400">
+                            {userProfile?.subscription?.status === 'active' 
+                              ? `Next billing date: ${new Date(userProfile.subscription.currentPeriodEnd).toLocaleDateString()}`
+                              : 'Upgrade to unlock all features'}
+                          </p>
+                        </div>
+                      </div>
+                      {userProfile?.subscription?.status !== 'active' && (
+                        <Link 
+                          to="/pricing"
+                          className="px-4 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 transition-colors"
+                        >
+                          Upgrade
+                        </Link>
+                      )}
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+                        <CheckCircle2 className="w-4 h-4 text-green-500 mr-2" />
+                        Unlimited course generation
+                      </div>
+                      <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+                        <CheckCircle2 className="w-4 h-4 text-green-500 mr-2" />
+                        Advanced AI models
+                      </div>
+                      <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+                        <CheckCircle2 className="w-4 h-4 text-green-500 mr-2" />
+                        Priority support
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-6 border-t border-gray-100 dark:border-gray-800">
+                    <h3 className="font-bold text-gray-900 dark:text-white mb-4">Billing History</h3>
+                    <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm italic">
+                      No transactions found.
+                    </div>
                   </div>
                 </motion.div>
               )}

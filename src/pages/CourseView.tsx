@@ -1,15 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Play, CheckCircle, HelpCircle, Loader2, Wand2, Image as ImageIcon, BarChart3 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, CheckCircle, HelpCircle, Loader2, Wand2, Image as ImageIcon, BarChart3, Shield, FileText, Award, BookmarkPlus, X } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, LineChart, Line } from 'recharts';
 import { useToast } from '../components/Toast';
+import { useAuth } from '../contexts/AuthContext';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { doc, getDoc, setDoc, onSnapshot, updateDoc, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
 import { geminiService } from '../services/gemini';
+import AssignmentsTab from '../components/AssignmentsTab';
+import CertificateModal from '../components/CertificateModal';
 
 export default function CourseView() {
   const { courseId } = useParams();
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const { user, profile } = useAuth();
   const [course, setCourse] = useState<any>(null);
   const [activeChapterIndex, setActiveChapterIndex] = useState(-1); // -1 for Overview
   const [activeTab, setActiveTab] = useState('learn');
@@ -21,6 +27,11 @@ export default function CourseView() {
   const [visualUrl, setVisualUrl] = useState<string | null>(null);
   const [isGeneratingVisual, setIsGeneratingVisual] = useState(false);
   const [isExtending, setIsExtending] = useState(false);
+  const [showCertificate, setShowCertificate] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
+  const [noteContent, setNoteContent] = useState('');
+  const [savedNotes, setSavedNotes] = useState<any[]>([]);
+  const [isSavingNote, setIsSavingNote] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
@@ -32,25 +43,35 @@ export default function CourseView() {
   }, [audioUrl]);
 
   useEffect(() => {
-    fetch(`/api/courses/${courseId}`)
-      .then(async res => {
-        const text = await res.text();
-        try {
-          return JSON.parse(text);
-        } catch (e) {
-          throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
-        }
-      })
-      .then(data => {
-        if (data.error) {
-          showToast('Course not found', 'error');
-          navigate('/');
-        } else {
-          setCourse(data);
-        }
-      })
-      .catch(err => console.error(err));
+    if (!courseId) return;
+
+    const unsub = onSnapshot(doc(db, 'courses', courseId), (docSnap) => {
+      if (docSnap.exists()) {
+        setCourse({ id: docSnap.id, ...docSnap.data() });
+      } else {
+        showToast('Course not found', 'error');
+        navigate('/');
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `courses/${courseId}`);
+    });
+
+    return () => unsub();
   }, [courseId, navigate]);
+
+  useEffect(() => {
+    if (!user || !courseId) return;
+
+    const progressRef = doc(db, 'users', user.uid, 'progress', courseId);
+    getDoc(progressRef).then(docSnap => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.lastChapterIndex !== undefined) {
+          setActiveChapterIndex(data.lastChapterIndex);
+        }
+      }
+    }).catch(err => console.error('Failed to fetch progress:', err));
+  }, [user, courseId]);
 
   useEffect(() => {
     // Reset states when chapter changes
@@ -69,6 +90,52 @@ export default function CourseView() {
     }
   }, [activeChapterIndex, course]);
 
+  useEffect(() => {
+    if (!user || !courseId || activeChapterIndex === -1) return;
+
+    const fetchNotes = async () => {
+      try {
+        const q = query(
+          collection(db, 'users', user.uid, 'notes'),
+          where('courseId', '==', courseId),
+          where('chapterIndex', '==', activeChapterIndex)
+        );
+        const snap = await getDocs(q);
+        setSavedNotes(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (error) {
+        console.error('Failed to fetch notes', error);
+      }
+    };
+
+    fetchNotes();
+  }, [user, courseId, activeChapterIndex]);
+
+  const handleSaveNote = async () => {
+    if (!user || !courseId || activeChapterIndex === -1 || !noteContent.trim()) return;
+    
+    setIsSavingNote(true);
+    try {
+      const noteData = {
+        userId: user.uid,
+        courseId,
+        chapterIndex: activeChapterIndex,
+        content: noteContent,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      
+      const docRef = await addDoc(collection(db, 'users', user.uid, 'notes'), noteData);
+      setSavedNotes(prev => [{ id: docRef.id, ...noteData }, ...prev]);
+      setNoteContent('');
+      showToast('Note saved successfully', 'success');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}/notes`);
+      showToast('Failed to save note', 'error');
+    } finally {
+      setIsSavingNote(false);
+    }
+  };
+
   const handleGenerateVisual = async (prompt: string) => {
     setIsGeneratingVisual(true);
     try {
@@ -82,6 +149,19 @@ export default function CourseView() {
       setIsGeneratingVisual(false);
     }
   };
+
+  useEffect(() => {
+    if (user && course && activeChapterIndex >= 0 && activeChapterIndex < course.chapters.length) {
+      const progressRef = doc(db, 'users', user.uid, 'progress', course.id);
+      setDoc(progressRef, {
+        courseId: course.id,
+        userId: user.uid,
+        lastChapterIndex: activeChapterIndex,
+        updatedAt: new Date().toISOString(),
+        completed: activeChapterIndex === course.chapters.length - 1
+      }, { merge: true }).catch(err => handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/progress/${course.id}`));
+    }
+  }, [activeChapterIndex, course?.id, user]);
 
   if (!course || !course.chapters || !Array.isArray(course.chapters) || course.chapters.length === 0) {
     return (
@@ -107,19 +187,42 @@ export default function CourseView() {
 
   const currentChapter = activeChapterIndex === -1 ? null : course.chapters[activeChapterIndex];
 
+  const isPremium = course.price && course.price > 0;
+  const hasAccess = !isPremium || (profile?.subscription?.status === 'active') || (profile?.role === 'admin') || (course.creatorId === user?.uid);
+
+  if (!hasAccess && activeChapterIndex !== -1) {
+    return (
+      <div className="flex flex-col justify-center items-center h-[calc(100vh-8rem)] space-y-6 text-center px-4">
+        <div className="w-20 h-20 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center">
+          <Shield className="w-10 h-10 text-amber-600" />
+        </div>
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Premium Content</h2>
+          <p className="text-gray-500 dark:text-gray-400 mt-2 max-w-md">
+            This course is part of our Pro plan. Upgrade your account to get full access to all chapters, quizzes, and AI features.
+          </p>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-4">
+          <button 
+            onClick={() => navigate('/pricing')}
+            className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 transition-all"
+          >
+            Upgrade to Pro
+          </button>
+          <button 
+            onClick={() => setActiveChapterIndex(-1)}
+            className="px-8 py-3 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 font-bold rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 transition-all"
+          >
+            Back to Overview
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const handleQuizSubmit = () => {
     setQuizSubmitted(true);
   };
-
-  useEffect(() => {
-    if (course && activeChapterIndex >= 0 && activeChapterIndex < course.chapters.length) {
-      fetch(`/api/courses/${course.id}/progress`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chapterIndex: activeChapterIndex })
-      }).catch(err => console.error('Failed to update progress:', err));
-    }
-  }, [activeChapterIndex, course?.id]);
 
   const handleNext = () => {
     if (activeChapterIndex < course.chapters.length - 1) {
@@ -153,17 +256,16 @@ export default function CourseView() {
       );
 
       if (rewrittenContent) {
-        const updatedCourse = {...course};
-        updatedCourse.chapters[activeChapterIndex].content = rewrittenContent;
-        setCourse(updatedCourse);
-        showToast('Content rewritten successfully', 'success');
+        const updatedChapters = [...course.chapters];
+        updatedChapters[activeChapterIndex].content = rewrittenContent;
         
-        // Save the updated course back to the backend
-        await fetch('/api/courses', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updatedCourse)
+        // Save the updated course back to Firestore
+        await updateDoc(doc(db, 'courses', course.id), {
+          chapters: updatedChapters
         });
+        
+        setCourse({ ...course, chapters: updatedChapters });
+        showToast('Content rewritten successfully', 'success');
       }
     } catch (err) {
       console.error(err);
@@ -195,19 +297,14 @@ export default function CourseView() {
         const maxBatchIndex = Math.max(...course.chapters.map((c: any) => c.batchIndex || 0));
         const chaptersWithBatch = newChapters.map((c: any) => ({ ...c, batchIndex: maxBatchIndex + 1 }));
 
-        const updatedCourse = {
-          ...course,
-          chapters: [...course.chapters, ...chaptersWithBatch]
-        };
+        const updatedChapters = [...course.chapters, ...chaptersWithBatch];
         
-        // 3. Save updated course
-        await fetch('/api/courses', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updatedCourse)
+        // 3. Save updated course to Firestore
+        await updateDoc(doc(db, 'courses', course.id), {
+          chapters: updatedChapters
         });
 
-        setCourse(updatedCourse);
+        setCourse({ ...course, chapters: updatedChapters });
         setActiveChapterIndex(course.chapters.length); // Start at the first new chapter
         showToast(`Added ${newChapters.length} new chapters!`, 'success');
       }
@@ -396,8 +493,23 @@ export default function CourseView() {
                 Practice
               </button>
             )}
+            <button 
+              onClick={() => setActiveTab('assignments')}
+              className={`text-sm font-medium pb-4 -mb-4 border-b-2 ${activeTab === 'assignments' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
+            >
+              Assignments
+            </button>
           </div>
           <div className="flex space-x-3">
+            {activeChapterIndex !== -1 && (
+              <button 
+                onClick={() => setShowNotes(!showNotes)}
+                className={`flex items-center text-sm font-medium px-3 py-1.5 rounded-full transition-colors ${showNotes ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white bg-gray-100 dark:bg-gray-800'}`}
+              >
+                <BookmarkPlus className="w-4 h-4 mr-1.5" />
+                Notes
+              </button>
+            )}
             <button 
               onClick={handleRewrite}
               disabled={isRewriting}
@@ -519,15 +631,31 @@ export default function CourseView() {
 
                 <div className="bg-indigo-50 dark:bg-indigo-900/20 p-8 rounded-3xl border border-indigo-100 dark:border-indigo-900/30 space-y-6">
                   <div className="space-y-2">
-                    <h3 className="text-xl font-bold text-indigo-900 dark:text-indigo-100">Want to learn more?</h3>
+                    <h3 className="text-xl font-bold text-indigo-900 dark:text-indigo-100">Claim Your Certificate</h3>
                     <p className="text-indigo-700 dark:text-indigo-300">
+                      You've earned a certificate of completion for this course. You can download and share it on your professional networks.
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => setShowCertificate(true)}
+                    className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold text-lg shadow-lg hover:bg-indigo-700 flex items-center justify-center"
+                  >
+                    <Award className="w-6 h-6 mr-2" />
+                    View & Download Certificate
+                  </button>
+                </div>
+
+                <div className="bg-gray-50 dark:bg-gray-800/50 p-8 rounded-3xl border border-gray-200 dark:border-gray-700 space-y-6">
+                  <div className="space-y-2">
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">Want to learn more?</h3>
+                    <p className="text-gray-600 dark:text-gray-400">
                       There's still more content in your source material that hasn't been covered yet. I can generate additional chapters for you.
                     </p>
                   </div>
                   <button 
                     onClick={handleExtendCourse}
                     disabled={isExtending}
-                    className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold text-lg shadow-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center"
+                    className="w-full py-4 bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-2xl font-bold text-lg shadow-sm hover:bg-indigo-50 dark:hover:bg-indigo-900/20 disabled:opacity-50 flex items-center justify-center"
                   >
                     {isExtending ? (
                       <>
@@ -552,16 +680,18 @@ export default function CourseView() {
                   </button>
                 </div>
               </div>
+            ) : activeTab === 'assignments' ? (
+              <AssignmentsTab courseId={course.id} />
             ) : activeTab === 'learn' ? (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 relative">
                 {(() => {
                   const hasSummary = currentChapter?.content?.split('\n').some((l: string) => l.trim().startsWith('- '));
                   const hasVisual = currentChapter?.visualMetadata?.type === 'chart' || isGeneratingVisual || visualUrl;
-                  const showSidebar = hasVisual || hasSummary;
+                  const showSidebar = hasVisual || hasSummary || showNotes;
 
                   return (
                     <>
-                      <div className={`${showSidebar ? 'lg:col-span-7' : 'lg:col-span-12'} prose prose-indigo dark:prose-invert max-w-none dyslexic-friendly`}>
+                      <div className={`${showSidebar ? 'lg:col-span-7' : 'lg:col-span-12'} prose prose-indigo dark:prose-invert max-w-none dyslexic-friendly transition-all duration-300`}>
                         <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">{currentChapter?.title}</h1>
                         <div className="text-gray-800 dark:text-gray-200 leading-relaxed">
                           <Markdown>{currentChapter?.content || 'No content available.'}</Markdown>
@@ -570,6 +700,53 @@ export default function CourseView() {
                       
                       {showSidebar && (
                         <div className="lg:col-span-5 space-y-6">
+                          {/* Notes Panel */}
+                          {showNotes && (
+                            <div className="bg-amber-50 dark:bg-amber-900/10 rounded-2xl border border-amber-200 dark:border-amber-800/50 overflow-hidden shadow-sm">
+                              <div className="px-4 py-3 border-b border-amber-200 dark:border-amber-800/50 flex items-center justify-between bg-amber-100/50 dark:bg-amber-900/30">
+                                <div className="flex items-center text-sm font-bold text-amber-900 dark:text-amber-300">
+                                  <BookmarkPlus className="w-4 h-4 mr-2" />
+                                  My Notes
+                                </div>
+                                <button onClick={() => setShowNotes(false)} className="text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200">
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                              <div className="p-4 space-y-4">
+                                <div>
+                                  <textarea
+                                    value={noteContent}
+                                    onChange={(e) => setNoteContent(e.target.value)}
+                                    placeholder="Add a note or highlight for this chapter..."
+                                    className="w-full p-3 border border-amber-200 dark:border-amber-700/50 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-amber-500 focus:border-amber-500 text-sm"
+                                    rows={3}
+                                  />
+                                  <div className="flex justify-end mt-2">
+                                    <button
+                                      onClick={handleSaveNote}
+                                      disabled={isSavingNote || !noteContent.trim()}
+                                      className="px-4 py-1.5 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 disabled:opacity-50 flex items-center"
+                                    >
+                                      {isSavingNote ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+                                      Save Note
+                                    </button>
+                                  </div>
+                                </div>
+                                
+                                {savedNotes.length > 0 && (
+                                  <div className="space-y-3 mt-4 pt-4 border-t border-amber-200 dark:border-amber-800/50">
+                                    <h4 className="text-xs font-bold text-amber-800 dark:text-amber-400 uppercase tracking-wider">Saved Notes</h4>
+                                    {savedNotes.map(note => (
+                                      <div key={note.id} className="bg-white dark:bg-gray-800 p-3 rounded-lg border border-amber-100 dark:border-amber-900/30 text-sm text-gray-700 dark:text-gray-300">
+                                        {note.content}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
                           {/* Visual Representation Section */}
                           {hasVisual && (
                             <div className="bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -774,6 +951,14 @@ export default function CourseView() {
           </button>
         </div>
       </div>
+      
+      {showCertificate && (
+        <CertificateModal 
+          courseTitle={course.title}
+          issueDate={new Date().toISOString()}
+          onClose={() => setShowCertificate(false)}
+        />
+      )}
     </div>
   );
 }

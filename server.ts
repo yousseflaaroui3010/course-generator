@@ -9,9 +9,24 @@ import { createRequire } from 'module';
 import { GoogleGenAI, Type } from '@google/genai';
 import { v4 as uuidv4 } from 'uuid';
 import * as dotenv from 'dotenv';
+import Stripe from 'stripe';
 
 // Load environment variables from .env file
 dotenv.config();
+
+let stripe: Stripe | null = null;
+
+function getStripe() {
+  if (!stripe) {
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (!key) {
+      console.warn('STRIPE_SECRET_KEY is not set. Payments will not work.');
+      return null;
+    }
+    stripe = new Stripe(key, { apiVersion: '2025-02-24.acacia' });
+  }
+  return stripe;
+}
 
 const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
@@ -207,6 +222,79 @@ async function startServer() {
     db.courses = {};
     db.videos = {};
     res.json({ message: 'All data cleared' });
+  });
+
+  // Stripe Routes
+  app.post('/api/create-payment-intent', async (req, res) => {
+    const { amount, courseId, userId } = req.body;
+    const stripeClient = getStripe();
+    
+    if (!stripeClient) {
+      return res.status(500).json({ error: 'Stripe is not configured' });
+    }
+
+    try {
+      const paymentIntent = await stripeClient.paymentIntents.create({
+        amount,
+        currency: 'usd',
+        metadata: { courseId, userId },
+        automatic_payment_methods: { enabled: true },
+      });
+
+      res.json({ clientSecret: paymentIntent.client_secret });
+    } catch (error: any) {
+      console.error('Stripe error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/create-checkout-session', async (req, res) => {
+    const { priceId, userId } = req.body;
+    const stripeClient = getStripe();
+
+    if (!stripeClient) {
+      return res.status(500).json({ error: 'Stripe is not configured' });
+    }
+
+    try {
+      const session = await stripeClient.checkout.sessions.create({
+        mode: 'subscription',
+        payment_method_types: ['card'],
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: `${req.headers.origin}/settings?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${req.headers.origin}/pricing`,
+        metadata: { userId },
+      });
+
+      res.json({ url: session.url });
+    } catch (error: any) {
+      console.error('Stripe error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+    const sig = req.headers['stripe-signature'] as string;
+    const stripeClient = getStripe();
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+    if (!stripeClient || !webhookSecret || !sig) {
+      return res.status(400).send('Webhook Error: Missing configuration');
+    }
+
+    let event;
+
+    try {
+      event = stripeClient.webhooks.constructEvent(req.body, sig, webhookSecret);
+    } catch (err: any) {
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    // Handle the event (In a real app, you'd update Firestore here)
+    // For now, we just log it.
+    console.log('Stripe Event:', event.type);
+
+    res.json({ received: true });
   });
 
   app.post('/api/rewrite', async (req, res) => {

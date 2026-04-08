@@ -1,0 +1,258 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and preferences",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Unique identifier from Firebase Auth" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["student", "teacher", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "preferences": {
+          "type": "object",
+          "properties": {
+            "darkMode": { "type": "boolean" },
+            "dyslexicFont": { "type": "boolean" }
+          }
+        }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Course": {
+      "title": "Course",
+      "description": "Educational course content",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "fileId": { "type": "string" },
+        "chapters": { "type": "array" },
+        "category": { "type": "string" },
+        "price": { "type": "number" },
+        "difficulty": { "type": "string", "enum": ["Beginner", "Intermediate", "Advanced"] },
+        "rating": { "type": "number" },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "creatorId"]
+    },
+    "UserProgress": {
+      "title": "UserProgress",
+      "description": "User's progress in a specific course",
+      "type": "object",
+      "properties": {
+        "courseId": { "type": "string" },
+        "userId": { "type": "string" },
+        "lastChapterIndex": { "type": "number" },
+        "completed": { "type": "boolean" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "completedAt": { "type": "string", "format": "date-time" },
+        "timeSpent": { "type": "number", "description": "Total time spent in seconds" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["courseId", "userId"]
+    },
+    "Video": {
+      "title": "Video",
+      "description": "Generated video content",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "scenes": { "type": "array" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "creatorId"]
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "User subscription details",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "canceled", "past_due", "incomplete"] },
+        "planId": { "type": "string" },
+        "currentPeriodEnd": { "type": "string", "format": "date-time" },
+        "stripeSubscriptionId": { "type": "string" },
+        "stripeCustomerId": { "type": "string" }
+      },
+      "required": ["userId", "status", "planId"]
+    },
+    "CoursePurchase": {
+      "title": "CoursePurchase",
+      "description": "Individual course purchase record",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "amount": { "type": "number" },
+        "currency": { "type": "string" },
+        "status": { "type": "string", "enum": ["succeeded", "pending", "failed"] },
+        "stripePaymentIntentId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "courseId", "status"]
+    },
+    "Assignment": {
+      "title": "Assignment",
+      "description": "Open-ended assignment or coding exercise",
+      "type": "object",
+      "properties": {
+        "courseId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string", "enum": ["text", "file", "code"] },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "points": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["courseId", "title", "type"]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "User's submission for an assignment",
+      "type": "object",
+      "properties": {
+        "assignmentId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "userId": { "type": "string" },
+        "content": { "type": "string" },
+        "fileUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["submitted", "reviewed"] },
+        "grade": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["assignmentId", "courseId", "userId", "status"]
+    },
+    "PeerReview": {
+      "title": "PeerReview",
+      "description": "Peer review for a submission",
+      "type": "object",
+      "properties": {
+        "submissionId": { "type": "string" },
+        "assignmentId": { "type": "string" },
+        "reviewerId": { "type": "string" },
+        "grade": { "type": "number" },
+        "feedback": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["submissionId", "assignmentId", "reviewerId", "grade"]
+    },
+    "Certificate": {
+      "title": "Certificate",
+      "description": "Course completion certificate",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "courseTitle": { "type": "string" },
+        "issueDate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "courseId", "courseTitle", "issueDate"]
+    },
+    "Note": {
+      "title": "Note",
+      "description": "User's private notes for a course chapter",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "chapterIndex": { "type": "number" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "courseId", "chapterIndex", "content"]
+    },
+    "LearningPath": {
+      "title": "LearningPath",
+      "description": "A curated sequence of courses",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "courseIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "creatorId", "courseIds"]
+    },
+    "Coupon": {
+      "title": "Coupon",
+      "description": "Discount codes for courses",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "courseId": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "discountPercentage": { "type": "number" },
+        "maxUses": { "type": "number" },
+        "currentUses": { "type": "number" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "courseId", "creatorId", "discountPercentage"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile data"
+    },
+    "/courses/{courseId}": {
+      "schema": "Course",
+      "description": "Global course content"
+    },
+    "/users/{userId}/progress/{courseId}": {
+      "schema": "UserProgress",
+      "description": "User-specific course progress"
+    },
+    "/videos/{videoId}": {
+      "schema": "Video",
+      "description": "Global video content"
+    },
+    "/users/{userId}/subscriptions/{subId}": {
+      "schema": "Subscription",
+      "description": "User subscription records"
+    },
+    "/users/{userId}/purchases/{purchaseId}": {
+      "schema": "CoursePurchase",
+      "description": "User course purchase records"
+    },
+    "/assignments/{assignmentId}": {
+      "schema": "Assignment",
+      "description": "Assignments for courses"
+    },
+    "/submissions/{submissionId}": {
+      "schema": "Submission",
+      "description": "User submissions for assignments"
+    },
+    "/peerReviews/{reviewId}": {
+      "schema": "PeerReview",
+      "description": "Peer reviews for submissions"
+    },
+    "/certificates/{certificateId}": {
+      "schema": "Certificate",
+      "description": "Course completion certificates"
+    },
+    "/users/{userId}/notes/{noteId}": {
+      "schema": "Note",
+      "description": "User's private notes"
+    },
+    "/learningPaths/{pathId}": {
+      "schema": "LearningPath",
+      "description": "Curated learning paths"
+    },
+    "/coupons/{couponId}": {
+      "schema": "Coupon",
+      "description": "Discount codes for courses"
+    }
+  }
+}

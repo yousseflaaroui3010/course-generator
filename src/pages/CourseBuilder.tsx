@@ -2,11 +2,15 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload, FileText, Settings, Wand2, Loader2, CheckCircle2 } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useAuth } from '../contexts/AuthContext';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, addDoc, query, where, getDocs } from 'firebase/firestore';
 import { geminiService } from '../services/gemini';
 
 export default function CourseBuilder() {
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const { user, profile } = useAuth();
   const [step, setStep] = useState(1);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -18,6 +22,9 @@ export default function CourseBuilder() {
   const [level, setLevel] = useState('Beginner');
   const [tone, setTone] = useState('Conversational & Engaging');
   const [options, setOptions] = useState({ quizzes: true, visuals: true, narration: false });
+  const [category, setCategory] = useState('Technology');
+  const [price, setPrice] = useState<number>(0);
+  const [published, setPublished] = useState(true);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -71,6 +78,23 @@ export default function CourseBuilder() {
   };
 
   const handleGenerate = async () => {
+    // Check subscription limits
+    if (profile?.role === 'student' && !profile?.subscription) {
+      try {
+        const coursesRef = collection(db, 'courses');
+        const q = query(coursesRef, where('creatorId', '==', user?.uid));
+        const snap = await getDocs(q);
+        
+        if (snap.size >= 2) {
+          showToast('Free plan limit reached (2 courses). Please upgrade to Pro!', 'error');
+          navigate('/pricing');
+          return;
+        }
+      } catch (err) {
+        console.error('Failed to check course limits:', err);
+      }
+    }
+
     setIsGenerating(true);
     
     // Fake progress animation
@@ -97,22 +121,26 @@ export default function CourseBuilder() {
       // Add batch index to initial chapters
       courseData.chapters = courseData.chapters.map((c: any) => ({ ...c, batchIndex: 0 }));
 
-      // 3. Save the generated course to the backend
-      const saveRes = await fetch('/api/courses', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...courseData, fileId })
+      // 3. Save the generated course to Firestore
+      const docRef = await addDoc(collection(db, 'courses'), {
+        ...courseData,
+        creatorId: user?.uid,
+        fileId,
+        category,
+        price,
+        difficulty: level,
+        published,
+        rating: 0,
+        createdAt: new Date().toISOString()
       });
-      
-      const saveResult = await saveRes.json();
       
       clearInterval(interval);
       setProgress(100);
       
-      if (saveResult.courseId) {
+      if (docRef.id) {
         showToast('Course generated successfully!', 'success');
         setTimeout(() => {
-          navigate(`/course/${saveResult.courseId}`);
+          navigate(`/course/${docRef.id}`);
         }, 1000);
       } else {
         showToast('Failed to save generated course', 'error');
@@ -120,6 +148,7 @@ export default function CourseBuilder() {
       }
     } catch (err: any) {
       console.error(err);
+      handleFirestoreError(err, OperationType.CREATE, 'courses');
       showToast(`Error: ${err.message || 'Failed to generate course'}`, 'error');
       clearInterval(interval);
       setIsGenerating(false);
@@ -221,6 +250,45 @@ export default function CourseBuilder() {
                   <option>Direct & Concise</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Category</label>
+                <select 
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="w-full bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border"
+                >
+                  <option>Technology</option>
+                  <option>Business</option>
+                  <option>Design</option>
+                  <option>Marketing</option>
+                  <option>Personal Development</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Price ($)</label>
+                <input 
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={price}
+                  onChange={(e) => setPrice(parseFloat(e.target.value) || 0)}
+                  className="w-full bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border"
+                  placeholder="0.00 for Free"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white">Marketplace Settings</h4>
+              <label className="flex items-center space-x-3">
+                <input 
+                  type="checkbox" 
+                  checked={published}
+                  onChange={(e) => setPublished(e.target.checked)}
+                  className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 dark:bg-gray-800 dark:border-gray-700" 
+                />
+                <span className="text-sm text-gray-700 dark:text-gray-300">Publish to Marketplace immediately</span>
+              </label>
             </div>
 
             <div className="space-y-3">

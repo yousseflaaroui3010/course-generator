@@ -1,6 +1,16 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
 @layer base {
+  body {
+    @apply font-sans text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-950 antialiased;
+  }
+
   .dyslexic-friendly {
     line-height: 1.8 !important;
     letter-spacing: 0.03em !important;
@@ -21,8 +31,7 @@
   }
 
   .dyslexic-friendly strong {
-    color: #4f46e5; /* Indigo-600 for emphasis */
-    font-weight: 700;
+    @apply text-indigo-600 font-bold;
   }
 
   .dyslexic-friendly ul, 
@@ -44,16 +53,24 @@
     background: transparent;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #e2e8f0;
-    border-radius: 10px;
-  }
-  .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #1e293b;
+    @apply bg-slate-200 dark:bg-slate-800 rounded-full;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #cbd5e1;
+    @apply bg-slate-300 dark:bg-slate-700;
   }
-  .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #334155;
+
+  .glass-card {
+    @apply bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 shadow-sm;
+  }
+
+  .saas-shadow {
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  }
+
+  .saas-shadow-hover {
+    @apply transition-all duration-300;
+  }
+  .saas-shadow-hover:hover {
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
   }
 }
