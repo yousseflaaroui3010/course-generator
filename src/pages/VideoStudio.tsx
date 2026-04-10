@@ -32,23 +32,49 @@ export default function VideoStudio() {
       }
 
       // 2. Save the generated video to Firestore
-      const docRef = await addDoc(collection(db, 'videos'), {
-        ...videoData,
-        creatorId: user?.uid,
-        status: 'generated',
-        createdAt: new Date().toISOString()
-      });
+      let docRef;
+      try {
+        docRef = await addDoc(collection(db, 'videos'), {
+          ...videoData,
+          creatorId: user?.uid,
+          status: 'generated',
+          createdAt: new Date().toISOString()
+        });
+      } catch (firestoreErr) {
+        handleFirestoreError(firestoreErr, OperationType.CREATE, 'videos');
+      }
       
-      if (docRef.id) {
+      if (docRef && docRef.id) {
         setVideoData({ id: docRef.id, ...videoData });
         showToast('Video script generated!', 'success');
       } else {
         showToast('Failed to save video script', 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      handleFirestoreError(err, OperationType.CREATE, 'videos');
-      showToast('Error generating video', 'error');
+      
+      let errorMessage = err.message || 'Error generating video';
+      try {
+        const parsed = JSON.parse(errorMessage);
+        if (parsed.error && parsed.error.message) {
+          errorMessage = parsed.error.message;
+        } else if (parsed.error && typeof parsed.error === 'string') {
+          try {
+            const nested = JSON.parse(parsed.error);
+            if (nested.error && nested.error.message) {
+              errorMessage = nested.error.message;
+            } else {
+              errorMessage = parsed.error;
+            }
+          } catch (e) {
+            errorMessage = parsed.error;
+          }
+        }
+      } catch (e) {
+        // Not JSON
+      }
+
+      showToast(`Error: ${errorMessage}`, 'error');
     } finally {
       setIsGenerating(false);
     }

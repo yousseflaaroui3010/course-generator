@@ -72,7 +72,10 @@ async function startServer() {
     console.log('Created uploads directory');
   }
 
-  const upload = multer({ dest: 'uploads/' });
+  const upload = multer({ 
+    dest: 'uploads/',
+    limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit to prevent OOM crashes
+  });
 
   // API Routes
   app.get('/api/health', (req, res) => {
@@ -359,6 +362,9 @@ async function startServer() {
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error('Server Error:', err);
     if (req.path.startsWith('/api/')) {
+      if (err.name === 'MulterError' && err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ error: 'File is too large. Maximum size is 10MB.' });
+      }
       res.status(err.status || 500).json({ error: err.message || 'Internal Server Error' });
     } else {
       next(err);

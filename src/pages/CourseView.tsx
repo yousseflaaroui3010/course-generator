@@ -1,15 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Play, CheckCircle, HelpCircle, Loader2, Wand2, Image as ImageIcon, BarChart3, Shield, FileText, Award, BookmarkPlus, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, CheckCircle, HelpCircle, Loader2, Wand2, Image as ImageIcon, BarChart3, Shield, FileText, Award, BookmarkPlus, X, Download, AlignLeft, MessageCircle, Send, Bot, User } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, LineChart, Line } from 'recharts';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { doc, getDoc, setDoc, onSnapshot, updateDoc, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { geminiService } from '../services/gemini';
 import AssignmentsTab from '../components/AssignmentsTab';
 import CertificateModal from '../components/CertificateModal';
+import VideoPlayer from '../components/VideoPlayer';
 
 export default function CourseView() {
   const { courseId } = useParams();
@@ -32,7 +33,24 @@ export default function CourseView() {
   const [noteContent, setNoteContent] = useState('');
   const [savedNotes, setSavedNotes] = useState<any[]>([]);
   const [isSavingNote, setIsSavingNote] = useState(false);
+  const [isUploadingVideo, setIsUploadingVideo] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  
+  // AI Tutor State
+  const [isTutorOpen, setIsTutorOpen] = useState(false);
+  const [tutorMessages, setTutorMessages] = useState<{role: 'user' | 'model', text: string}[]>([]);
+  const [tutorInput, setTutorInput] = useState('');
+  const [isTutorTyping, setIsTutorTyping] = useState(false);
+  const tutorMessagesEndRef = useRef<HTMLDivElement>(null);
+
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+
+  useEffect(() => {
+    if (isTutorOpen && tutorMessagesEndRef.current) {
+      tutorMessagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [tutorMessages, isTutorOpen]);
 
   useEffect(() => {
     if (audioUrl && audioRef.current) {
@@ -153,13 +171,34 @@ export default function CourseView() {
   useEffect(() => {
     if (user && course && activeChapterIndex >= 0 && activeChapterIndex < course.chapters.length) {
       const progressRef = doc(db, 'users', user.uid, 'progress', course.id);
-      setDoc(progressRef, {
-        courseId: course.id,
-        userId: user.uid,
-        lastChapterIndex: activeChapterIndex,
-        updatedAt: new Date().toISOString(),
-        completed: activeChapterIndex === course.chapters.length - 1
-      }, { merge: true }).catch(err => handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/progress/${course.id}`));
+      
+      getDoc(progressRef).then(docSnap => {
+        const currentData = docSnap.exists() ? docSnap.data() : { completedChapters: [] };
+        const completedChapters = currentData.completedChapters || [];
+        
+        // Add current chapter to completed if not already there
+        if (!completedChapters.includes(activeChapterIndex)) {
+          completedChapters.push(activeChapterIndex);
+        }
+
+        // Calculate skipped: chapters before current that are not in completedChapters
+        const skippedChapters = [];
+        for (let i = 0; i < activeChapterIndex; i++) {
+          if (!completedChapters.includes(i)) {
+            skippedChapters.push(i);
+          }
+        }
+
+        setDoc(progressRef, {
+          courseId: course.id,
+          userId: user.uid,
+          lastChapterIndex: activeChapterIndex,
+          completedChapters,
+          skippedCount: skippedChapters.length,
+          updatedAt: new Date().toISOString(),
+          completed: activeChapterIndex === course.chapters.length - 1
+        }, { merge: true }).catch(err => handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/progress/${course.id}`));
+      });
     }
   }, [activeChapterIndex, course?.id, user]);
 
@@ -219,6 +258,62 @@ export default function CourseView() {
       </div>
     );
   }
+
+  const handleDownloadOffline = async () => {
+    if (!course) return;
+    setIsDownloading(true);
+    try {
+      // 1. Save course data to localStorage
+      localStorage.setItem(`offline_course_${course.id}`, JSON.stringify(course));
+
+      // 2. Cache media files (images, videos)
+      if ('caches' in window) {
+        const cache = await caches.open('fx-skool-offline-media');
+        const urlsToCache: string[] = [];
+
+        course.chapters?.forEach((ch: any) => {
+          if (ch.videoUrl) urlsToCache.push(ch.videoUrl);
+          // We could also extract image URLs from markdown content here if needed
+        });
+
+        if (urlsToCache.length > 0) {
+          await cache.addAll(urlsToCache);
+        }
+      }
+
+      showToast('Course downloaded for offline viewing!', 'success');
+    } catch (error) {
+      console.error('Error downloading course:', error);
+      showToast('Failed to download course for offline viewing.', 'error');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleTutorSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tutorInput.trim() || !currentChapter) return;
+
+    const userMessage = tutorInput.trim();
+    setTutorInput('');
+    setTutorMessages(prev => [...prev, { role: 'user', text: userMessage }]);
+    setIsTutorTyping(true);
+
+    try {
+      const response = await geminiService.chatWithTutor(
+        userMessage,
+        currentChapter.content,
+        tutorMessages
+      );
+      
+      setTutorMessages(prev => [...prev, { role: 'model', text: response }]);
+    } catch (error) {
+      console.error('Tutor error:', error);
+      showToast('Failed to get response from AI Tutor.', 'error');
+    } finally {
+      setIsTutorTyping(false);
+    }
+  };
 
   const handleQuizSubmit = () => {
     setQuizSubmitted(true);
@@ -343,6 +438,65 @@ export default function CourseView() {
       showToast('Failed to generate audio', 'error');
     } finally {
       setIsGeneratingAudio(false);
+    }
+  };
+
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.[0] || !course || activeChapterIndex === -1) return;
+    
+    const file = e.target.files[0];
+    if (!file.type.startsWith('video/')) {
+      showToast('Please upload a video file', 'error');
+      return;
+    }
+
+    setIsUploadingVideo(true);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      // For this demo, we use the same upload endpoint which returns a fileId
+      // In a real app, you'd upload to Firebase Storage
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!res.ok) {
+        if (res.status === 413) {
+          throw new Error('File is too large. Please upload a smaller file.');
+        }
+        const text = await res.text();
+        try {
+          const errData = JSON.parse(text);
+          throw new Error(errData.error || 'Upload failed');
+        } catch (e) {
+          throw new Error(`Upload failed with status ${res.status}. The file might be too large.`);
+        }
+      }
+      
+      const data = await res.json();
+
+      if (data.fileId) {
+        const updatedChapters = [...course.chapters];
+        // We'll use a mock URL for the video player since we don't have a real streaming server
+        // In a real app, this would be the URL from Firebase Storage
+        updatedChapters[activeChapterIndex].videoUrl = `/api/files/${data.fileId}`;
+        
+        await updateDoc(doc(db, 'courses', course.id), {
+          chapters: updatedChapters
+        });
+        
+        setCourse({ ...course, chapters: updatedChapters });
+        showToast('Video uploaded successfully', 'success');
+      } else {
+        throw new Error(data.error || 'Failed to upload video');
+      }
+    } catch (err: any) {
+      console.error('Video upload failed:', err);
+      showToast(err.message || 'Failed to upload video', 'error');
+    } finally {
+      setIsUploadingVideo(false);
     }
   };
 
@@ -499,8 +653,33 @@ export default function CourseView() {
             >
               Assignments
             </button>
+            <button 
+              onClick={() => setActiveTab('transcript')}
+              className={`text-sm font-medium pb-4 -mb-4 border-b-2 ${activeTab === 'transcript' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
+            >
+              Transcript
+            </button>
           </div>
           <div className="flex space-x-3">
+            {course.creatorId === user?.uid && activeChapterIndex !== -1 && (
+              <>
+                <input 
+                  type="file" 
+                  ref={videoInputRef} 
+                  className="hidden" 
+                  accept="video/mp4,video/x-m4v,video/*" 
+                  onChange={handleVideoUpload}
+                />
+                <button 
+                  onClick={() => videoInputRef.current?.click()}
+                  disabled={isUploadingVideo}
+                  className="flex items-center text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 dark:hover:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 px-3 py-1.5 rounded-full disabled:opacity-50"
+                >
+                  {isUploadingVideo ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Play className="w-4 h-4 mr-1.5" />}
+                  Upload Video
+                </button>
+              </>
+            )}
             {activeChapterIndex !== -1 && (
               <button 
                 onClick={() => setShowNotes(!showNotes)}
@@ -517,6 +696,13 @@ export default function CourseView() {
             >
               {isRewriting ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Wand2 className="w-4 h-4 mr-1.5" />}
               Rewrite Content
+            </button>
+            <button 
+              onClick={() => setIsTutorOpen(true)}
+              className="flex items-center text-sm font-medium text-purple-600 dark:text-purple-400 hover:text-purple-500 dark:hover:text-purple-300 bg-purple-50 dark:bg-purple-900/20 px-3 py-1.5 rounded-full"
+            >
+              <MessageCircle className="w-4 h-4 mr-1.5" />
+              Ask AI Tutor
             </button>
             <button 
               onClick={handleGenerateAudio}
@@ -608,12 +794,20 @@ export default function CourseView() {
                   </div>
                 </div>
 
-                <div className="flex justify-center pt-8">
+                <div className="flex justify-center pt-8 gap-4">
                   <button 
                     onClick={() => setActiveChapterIndex(0)}
                     className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold text-lg shadow-lg shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all transform hover:scale-105"
                   >
                     Start Learning Now
+                  </button>
+                  <button 
+                    onClick={handleDownloadOffline}
+                    disabled={isDownloading}
+                    className="flex items-center px-8 py-4 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 rounded-2xl font-bold text-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all disabled:opacity-50"
+                  >
+                    {isDownloading ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Download className="w-5 h-5 mr-2" />}
+                    Download for Offline
                   </button>
                 </div>
               </div>
@@ -682,6 +876,18 @@ export default function CourseView() {
               </div>
             ) : activeTab === 'assignments' ? (
               <AssignmentsTab courseId={course.id} />
+            ) : activeTab === 'transcript' ? (
+              <div className="max-w-4xl mx-auto">
+                <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-8 shadow-sm">
+                  <div className="flex items-center mb-6 border-b border-gray-100 dark:border-gray-700 pb-4">
+                    <AlignLeft className="w-6 h-6 text-indigo-600 dark:text-indigo-400 mr-3" />
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Interactive Transcript</h2>
+                  </div>
+                  <div className="prose prose-indigo dark:prose-invert max-w-none text-gray-800 dark:text-gray-200 leading-relaxed">
+                    <Markdown>{currentChapter?.content || 'No transcript available.'}</Markdown>
+                  </div>
+                </div>
+              </div>
             ) : activeTab === 'learn' ? (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 relative">
                 {(() => {
@@ -693,6 +899,13 @@ export default function CourseView() {
                     <>
                       <div className={`${showSidebar ? 'lg:col-span-7' : 'lg:col-span-12'} prose prose-indigo dark:prose-invert max-w-none dyslexic-friendly transition-all duration-300`}>
                         <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">{currentChapter?.title}</h1>
+                        
+                        {currentChapter?.videoUrl && (
+                          <div className="mb-8">
+                            <VideoPlayer src={currentChapter.videoUrl} title={currentChapter.title} />
+                          </div>
+                        )}
+
                         <div className="text-gray-800 dark:text-gray-200 leading-relaxed">
                           <Markdown>{currentChapter?.content || 'No content available.'}</Markdown>
                         </div>
@@ -952,6 +1165,79 @@ export default function CourseView() {
         </div>
       </div>
       
+      {/* AI Tutor Sidebar */}
+      {isTutorOpen && (
+        <div className="fixed inset-y-0 right-0 w-96 bg-white dark:bg-gray-900 shadow-2xl border-l border-gray-200 dark:border-gray-800 flex flex-col z-50 transform transition-transform duration-300 translate-x-0">
+          <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800 bg-purple-50 dark:bg-purple-900/20">
+            <div className="flex items-center">
+              <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-800 flex items-center justify-center mr-3">
+                <Bot className="w-5 h-5 text-purple-600 dark:text-purple-300" />
+              </div>
+              <div>
+                <h3 className="font-bold text-gray-900 dark:text-white">Khanmigo</h3>
+                <p className="text-xs text-purple-600 dark:text-purple-400">AI Teaching Assistant</p>
+              </div>
+            </div>
+            <button onClick={() => setIsTutorOpen(false)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-gray-900/50">
+            {tutorMessages.length === 0 && (
+              <div className="text-center text-gray-500 dark:text-gray-400 mt-8">
+                <Bot className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p className="text-sm">Hi! I'm your AI tutor.</p>
+                <p className="text-xs mt-1">Ask me anything about this chapter.</p>
+              </div>
+            )}
+            
+            {tutorMessages.map((msg, idx) => (
+              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] rounded-2xl px-4 py-2 ${
+                  msg.role === 'user' 
+                    ? 'bg-indigo-600 text-white rounded-br-sm' 
+                    : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200 rounded-bl-sm shadow-sm'
+                }`}>
+                  <Markdown className="text-sm prose-sm dark:prose-invert max-w-none">{msg.text}</Markdown>
+                </div>
+              </div>
+            ))}
+            
+            {isTutorTyping && (
+              <div className="flex justify-start">
+                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl rounded-bl-sm px-4 py-3 shadow-sm flex space-x-1.5">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                </div>
+              </div>
+            )}
+            <div ref={tutorMessagesEndRef} />
+          </div>
+          
+          <div className="p-4 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+            <form onSubmit={handleTutorSubmit} className="flex items-center space-x-2">
+              <input
+                type="text"
+                value={tutorInput}
+                onChange={(e) => setTutorInput(e.target.value)}
+                placeholder="Ask a question..."
+                disabled={isTutorTyping || !currentChapter}
+                className="flex-1 bg-gray-100 dark:bg-gray-800 border-transparent focus:bg-white dark:focus:bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900 rounded-full px-4 py-2 text-sm text-gray-900 dark:text-white disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={!tutorInput.trim() || isTutorTyping || !currentChapter}
+                className="w-10 h-10 rounded-full bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center disabled:opacity-50 flex-shrink-0 transition-colors"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {showCertificate && (
         <CertificateModal 
           courseTitle={course.title}

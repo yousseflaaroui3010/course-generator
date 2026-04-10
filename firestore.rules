@@ -68,26 +68,39 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == 'student';
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role in ['student', 'teacher'] || 
+                     (request.resource.data.role == 'admin' && request.auth.token.email == "yousseflaaroui1@gmail.com"));
       allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
                     (request.resource.data.role == resource.data.role || isAdmin());
 
-      match /progress/{courseId} {
-        allow read, write: if isOwner(userId);
-      }
+    match /users/{userId}/progress/{courseId} {
+      allow read: if isOwner(userId) || 
+                  (isAuthenticated() && get(/databases/$(database)/documents/courses/$(courseId)).data.creatorId == request.auth.uid) ||
+                  isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    // Collection Group rule for progress analytics
+    match /{path=**}/progress/{courseId} {
+      allow read: if isAuthenticated() && 
+                  (get(/databases/$(database)/documents/courses/$(resource.data.courseId)).data.creatorId == request.auth.uid ||
+                   resource.data.userId == request.auth.uid ||
+                   isAdmin());
+    }
     }
 
     match /courses/{courseId} {
       allow read: if true;
-      allow create: if isTeacher() && isValidCourse(request.resource.data);
-      allow update: if (isTeacher() && resource.data.creatorId == request.auth.uid) || isAdmin();
+      allow create: if isAuthenticated() && isValidCourse(request.resource.data);
+      allow update: if (isAuthenticated() && resource.data.creatorId == request.auth.uid) || isAdmin();
       allow delete: if isAdmin();
     }
 
     match /videos/{videoId} {
       allow read: if isAuthenticated();
-      allow create: if isTeacher();
-      allow update: if (isTeacher() && resource.data.creatorId == request.auth.uid) || isAdmin();
+      allow create: if isAuthenticated();
+      allow update: if (isAuthenticated() && resource.data.creatorId == request.auth.uid) || isAdmin();
       allow delete: if isAdmin();
     }
 

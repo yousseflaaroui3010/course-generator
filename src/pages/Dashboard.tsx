@@ -85,15 +85,13 @@ export default function Dashboard() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Welcome back, {profile?.displayName || 'Student'}</h1>
         <div className="flex space-x-4">
-          {(profile?.role === 'teacher' || profile?.role === 'admin') && (
-            <Link
-              to="/build"
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              New Course
-            </Link>
-          )}
+          <Link
+            to="/build"
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            New Course
+          </Link>
         </div>
       </div>
 

@@ -1,8 +1,15 @@
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
+import OpenAI from "openai";
 
-// Initialize Gemini AI
-// process.env.GEMINI_API_KEY is automatically injected by the platform in the frontend
+// Initialize Gemini AI for image/audio
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+
+// Initialize OpenRouter for text generation
+const openRouter = new OpenAI({
+  baseURL: "https://openrouter.ai/api/v1",
+  apiKey: import.meta.env.VITE_OPEN_ROUTER_API_KEY || '',
+  dangerouslyAllowBrowser: true,
+});
 
 /**
  * Wraps raw L16 PCM data in a WAV header to make it playable by standard audio tags.
@@ -112,17 +119,51 @@ function repairJson(json: string): string {
 export const geminiService = {
   async generateCourse(sourceText: string, level: string, tone: string, options: any) {
     const isImage = sourceText.startsWith('IMAGE_DATA:');
-    let contents: any[] = [];
+    let messages: any[] = [];
+
+    const systemInstruction = `You are an expert instructional designer specializing in accessible education. 
+    Your task is to transform any provided source material (text or image) into a high-quality, structured educational course. 
+    
+    ACCESSIBILITY GUIDELINES (Dyslexic & ADHD Friendly):
+    1. Use short, punchy sentences and active voice.
+    2. Break text into very small paragraphs (max 3 sentences).
+    3. Use bullet points and numbered lists extensively to chunk information.
+    4. Bold key terms and important concepts to help with scanning.
+    5. Use a clear, logical hierarchy with descriptive headings.
+    6. Avoid long blocks of uninterrupted text.
+    7. Be concise and focused. 
+    
+    COURSE STRUCTURE:
+    - Even if the source material is brief or just an image, you must expand upon the core concepts to create a comprehensive learning experience. 
+    - You MUST return exactly 3-5 chapters. 
+    - Each chapter MUST have a title, concise markdown content (max 400 words), and visual metadata. 
+    - If the source is very short, use your internal knowledge to flesh out the chapters while staying true to the original topic.
+    
+    You MUST return a valid JSON object matching this structure:
+    {
+      "title": "Course Title",
+      "description": "Course Description",
+      "chapters": [
+        {
+          "id": "ch1",
+          "title": "Chapter 1",
+          "content": "Markdown content...",
+          "visualMetadata": { "type": "image", "prompt": "Description..." },
+          "quiz": [{ "question": "...", "options": ["...", "..."], "correctAnswerIndex": 0 }]
+        }
+      ]
+    }`;
 
     if (isImage) {
       const parts = sourceText.split(':');
       const mimeType = parts[1];
       const base64Data = parts[2];
-      contents = [
+      messages = [
+        { role: 'system', content: systemInstruction },
         {
           role: 'user',
-          parts: [
-            { text: `Create a structured educational course based on the provided image. 
+          content: [
+            { type: 'text', text: `Create a structured educational course based on the provided image. 
               Target Audience Level: ${level}
               Tone: ${tone}
               Include Quizzes: ${options.quizzes}
@@ -133,7 +174,7 @@ export const geminiService = {
               - The 'content' field MUST be concise Markdown (max 400 words). Use headings and bullet points.
               - If 'quizzes' is true, each chapter MUST have a 'quiz' array with 3 questions.
               - If 'visuals' is true, each chapter MUST have 'visualMetadata' with a 'type' and 'prompt'.` },
-            { inlineData: { mimeType, data: base64Data } }
+            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Data}` } }
           ]
         }
       ];
@@ -150,105 +191,22 @@ export const geminiService = {
         - If 'quizzes' is true, each chapter MUST have a 'quiz' array with 3 questions.
         - If 'visuals' is true, each chapter MUST have 'visualMetadata' with a 'type' and 'prompt'.
         
-        EXAMPLE STRUCTURE:
-        {
-          "title": "Course Title",
-          "chapters": [
-            {
-              "id": "ch1",
-              "title": "Chapter 1",
-              "content": "Markdown content...",
-              "visualMetadata": { "type": "image", "prompt": "Description..." },
-              "quiz": [{ "question": "...", "options": ["...", "..."], "correctAnswerIndex": 0 }]
-            }
-          ]
-        }
-        
         Source Material:
         ${sourceText.substring(0, 20000)}
         `;
-      contents = [{ role: 'user', parts: [{ text: prompt }] }];
+      messages = [
+        { role: 'system', content: systemInstruction },
+        { role: 'user', content: prompt }
+      ];
     }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents,
-      config: {
-        systemInstruction: `You are an expert instructional designer specializing in accessible education. 
-        Your task is to transform any provided source material (text or image) into a high-quality, structured educational course. 
-        
-        ACCESSIBILITY GUIDELINES (Dyslexic & ADHD Friendly):
-        1. Use short, punchy sentences and active voice.
-        2. Break text into very small paragraphs (max 3 sentences).
-        3. Use bullet points and numbered lists extensively to chunk information.
-        4. Bold key terms and important concepts to help with scanning.
-        5. Use a clear, logical hierarchy with descriptive headings.
-        6. Avoid long blocks of uninterrupted text.
-        7. Be concise and focused. 
-        
-        COURSE STRUCTURE:
-        - Even if the source material is brief or just an image, you must expand upon the core concepts to create a comprehensive learning experience. 
-        - You MUST return exactly 3-5 chapters. 
-        - Each chapter MUST have a title, concise markdown content (max 400 words), and visual metadata. 
-        - If the source is very short, use your internal knowledge to flesh out the chapters while staying true to the original topic.`,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          required: ["title", "chapters"],
-          properties: {
-            title: { type: Type.STRING },
-            description: { type: Type.STRING },
-            chapters: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                required: ["id", "title", "content", "visualMetadata"],
-                properties: {
-                  id: { type: Type.STRING },
-                  title: { type: Type.STRING },
-                  content: { type: Type.STRING, description: "Concise Markdown content (max 400 words). Use headings and lists." },
-                  visualMetadata: {
-                    type: Type.OBJECT,
-                    required: ["type", "prompt"],
-                    description: "Metadata for generating a visual representation of this chapter.",
-                    properties: {
-                      type: { type: Type.STRING, enum: ["image", "chart", "diagram"], description: "The type of visual that best suits this content." },
-                      chartType: { type: Type.STRING, enum: ["bar", "pie", "line"], description: "If type is 'chart', specify the chart style." },
-                      prompt: { type: Type.STRING, description: "A detailed prompt for an image generator or a description for a diagram." },
-                      chartData: { 
-                        type: Type.ARRAY, 
-                        description: "If type is 'chart', provide a simple array of objects with 'name' and 'value' for a bar/pie chart.",
-                        items: {
-                          type: Type.OBJECT,
-                          properties: {
-                            name: { type: Type.STRING },
-                            value: { type: Type.NUMBER }
-                          }
-                        }
-                      }
-                    }
-                  },
-                  quiz: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      required: ["question", "options", "correctAnswerIndex"],
-                      properties: {
-                        question: { type: Type.STRING },
-                        options: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        correctAnswerIndex: { type: Type.INTEGER }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+    const response = await openRouter.chat.completions.create({
+      model: 'anthropic/claude-3.5-sonnet',
+      messages,
+      response_format: { type: 'json_object' }
     });
 
-    const text = response.text;
+    const text = response.choices[0]?.message?.content;
     if (!text) throw new Error('AI returned an empty response');
     
     try {
@@ -309,12 +267,12 @@ export const geminiService = {
     Content to rewrite:
     ${content}`;
     
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
+    const response = await openRouter.chat.completions.create({
+      model: 'anthropic/claude-3.5-sonnet',
+      messages: [{ role: 'user', content: prompt }]
     });
     
-    return response.text;
+    return response.choices[0]?.message?.content || content;
   },
 
   async generateAudio(text: string, voiceName: string = 'Puck') {
@@ -372,84 +330,46 @@ export const geminiService = {
     ${sourceText.substring(0, 20000)}
     `;
 
-    const contents = [{ role: 'user', parts: [{ text: prompt }] }];
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents,
-      config: {
-        systemInstruction: `You are an expert instructional designer specializing in accessible education. 
-        Your task is to generate ADDITIONAL chapters for an existing course. 
-        
-        ACCESSIBILITY GUIDELINES (Dyslexic & ADHD Friendly):
-        1. Use short, punchy sentences and active voice.
-        2. Break text into very small paragraphs (max 3 sentences).
-        3. Use bullet points and numbered lists extensively to chunk information.
-        4. Bold key terms and important concepts to help with scanning.
-        5. Use a clear, logical hierarchy with descriptive headings.
-        6. Avoid long blocks of uninterrupted text.
-        7. Be concise and focused. 
-        
-        COURSE STRUCTURE:
-        - Generate exactly 3-5 NEW chapters. 
-        - Each chapter MUST have a title, concise markdown content (max 400 words), and visual metadata. 
-        - Ensure these chapters build logically upon the existing ones without repeating content.`,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          required: ["chapters"],
-          properties: {
-            chapters: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                required: ["id", "title", "content", "visualMetadata"],
-                properties: {
-                  id: { type: Type.STRING },
-                  title: { type: Type.STRING },
-                  content: { type: Type.STRING, description: "Concise Markdown content (max 400 words). Use headings and lists." },
-                  visualMetadata: {
-                    type: Type.OBJECT,
-                    required: ["type", "prompt"],
-                    description: "Metadata for generating a visual representation of this chapter.",
-                    properties: {
-                      type: { type: Type.STRING, enum: ["image", "chart", "diagram"], description: "The type of visual that best suits this content." },
-                      chartType: { type: Type.STRING, enum: ["bar", "pie", "line"], description: "If type is 'chart', specify the chart style." },
-                      prompt: { type: Type.STRING, description: "A detailed prompt for an image generator or a description for a diagram." },
-                      chartData: { 
-                        type: Type.ARRAY, 
-                        description: "If type is 'chart', provide a simple array of objects with 'name' and 'value' for a bar/pie chart.",
-                        items: {
-                          type: Type.OBJECT,
-                          properties: {
-                            name: { type: Type.STRING },
-                            value: { type: Type.NUMBER }
-                          }
-                        }
-                      }
-                    }
-                  },
-                  quiz: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      required: ["question", "options", "correctAnswerIndex"],
-                      properties: {
-                        question: { type: Type.STRING },
-                        options: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        correctAnswerIndex: { type: Type.INTEGER }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
+    const systemInstruction = `You are an expert instructional designer specializing in accessible education. 
+    Your task is to generate ADDITIONAL chapters for an existing course. 
+    
+    ACCESSIBILITY GUIDELINES (Dyslexic & ADHD Friendly):
+    1. Use short, punchy sentences and active voice.
+    2. Break text into very small paragraphs (max 3 sentences).
+    3. Use bullet points and numbered lists extensively to chunk information.
+    4. Bold key terms and important concepts to help with scanning.
+    5. Use a clear, logical hierarchy with descriptive headings.
+    6. Avoid long blocks of uninterrupted text.
+    7. Be concise and focused. 
+    
+    COURSE STRUCTURE:
+    - Generate exactly 3-5 NEW chapters. 
+    - Each chapter MUST have a title, concise markdown content (max 400 words), and visual metadata. 
+    - Ensure these chapters build logically upon the existing ones without repeating content.
+    
+    You MUST return a valid JSON object matching this structure:
+    {
+      "chapters": [
+        {
+          "id": "ch_new1",
+          "title": "New Chapter 1",
+          "content": "Markdown content...",
+          "visualMetadata": { "type": "image", "prompt": "Description..." },
+          "quiz": [{ "question": "...", "options": ["...", "..."], "correctAnswerIndex": 0 }]
         }
-      }
+      ]
+    }`;
+
+    const response = await openRouter.chat.completions.create({
+      model: 'anthropic/claude-3.5-sonnet',
+      messages: [
+        { role: 'system', content: systemInstruction },
+        { role: 'user', content: prompt }
+      ],
+      response_format: { type: 'json_object' }
     });
 
-    const text = response.text;
+    const text = response.choices[0]?.message?.content;
     if (!text) throw new Error('AI returned an empty response');
     
     try {
@@ -489,46 +409,41 @@ export const geminiService = {
       
       Break it down into exactly 3-5 scenes. Ensure each scene's narration is very concise (max 60 words).`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: aiPrompt,
-      config: {
-        systemInstruction: `You are a professional video scriptwriter specializing in accessible educational content. 
-        Your task is to create engaging, very concise scripts in JSON format that are Dyslexic and ADHD friendly.
-        
-        WRITING GUIDELINES:
-        1. Use short, punchy sentences.
-        2. Use clear, direct language.
-        3. Break information into small, digestible chunks.
-        
-        Tailor the content for a ${audience || 'General'} audience. 
-        Ensure the script meets these learning objectives: ${objectives || 'General education'}.
-        Follow these criteria: ${criteria?.join(', ') || 'Standard educational format'}.
-        Break it down into exactly 3-5 scenes. Ensure each scene's narration is very concise (max 60 words).`,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          required: ["title", "scenes"],
-          properties: {
-            title: { type: Type.STRING },
-            scenes: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                required: ["id", "narration", "visualDescription"],
-                properties: {
-                  id: { type: Type.STRING },
-                  narration: { type: Type.STRING },
-                  visualDescription: { type: Type.STRING }
-                }
-              }
-            }
-          }
+    const systemInstruction = `You are a professional video scriptwriter specializing in accessible educational content. 
+    Your task is to create engaging, very concise scripts in JSON format that are Dyslexic and ADHD friendly.
+    
+    WRITING GUIDELINES:
+    1. Use short, punchy sentences.
+    2. Use clear, direct language.
+    3. Break information into small, digestible chunks.
+    
+    Tailor the content for a ${audience || 'General'} audience. 
+    Ensure the script meets these learning objectives: ${objectives || 'General education'}.
+    Follow these criteria: ${criteria?.join(', ') || 'Standard educational format'}.
+    Break it down into exactly 3-5 scenes. Ensure each scene's narration is very concise (max 60 words).
+    
+    You MUST return a valid JSON object matching this structure:
+    {
+      "title": "Video Title",
+      "scenes": [
+        {
+          "id": "scene_1",
+          "narration": "Narration text...",
+          "visualDescription": "Visual description..."
         }
-      }
+      ]
+    }`;
+
+    const response = await openRouter.chat.completions.create({
+      model: 'anthropic/claude-3.5-sonnet',
+      messages: [
+        { role: 'system', content: systemInstruction },
+        { role: 'user', content: aiPrompt }
+      ],
+      response_format: { type: 'json_object' }
     });
 
-    const text = response.text;
+    const text = response.choices[0]?.message?.content;
     if (!text) throw new Error('AI returned an empty response');
     
     try {
@@ -564,6 +479,38 @@ export const geminiService = {
         throw new Error('The AI response was too long and got truncated. Please try a more specific prompt.');
       }
       throw e;
+    }
+  },
+
+  async chatWithTutor(message: string, chapterContent: string, previousMessages: { role: 'user' | 'model', text: string }[]) {
+    try {
+      const formattedHistory = previousMessages.map(msg => ({
+        role: msg.role === 'model' ? 'assistant' : 'user',
+        content: msg.text
+      }));
+
+      const response = await openRouter.chat.completions.create({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert AI teaching assistant named Khanmigo.
+Your goal is to help the student understand the current chapter material.
+DO NOT just give them the answer. Use the Socratic method to guide them to the answer.
+Be encouraging, concise, and clear.
+
+CURRENT CHAPTER CONTENT:
+${chapterContent}`
+          },
+          ...formattedHistory,
+          { role: "user", content: message }
+        ]
+      });
+
+      return response.choices[0]?.message?.content || "I'm sorry, I couldn't process that.";
+    } catch (error) {
+      console.error('Tutor chat error:', error);
+      throw new Error('Failed to communicate with the AI tutor.');
     }
   }
 };

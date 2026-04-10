@@ -6,6 +6,8 @@ import { Navigate } from 'react-router-dom';
 export default function LoginPage() {
   const { signIn, user, loading } = useAuth();
 
+  const [selectedRole, setSelectedRole] = React.useState<'student' | 'teacher'>('student');
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
@@ -75,8 +77,31 @@ export default function LoginPage() {
           </div>
 
           <div className="mt-8 space-y-6">
+            <div className="flex p-1 bg-gray-100 dark:bg-gray-800 rounded-xl">
+              <button
+                onClick={() => setSelectedRole('student')}
+                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
+                  selectedRole === 'student'
+                    ? 'bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+              >
+                I'm a Student
+              </button>
+              <button
+                onClick={() => setSelectedRole('teacher')}
+                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
+                  selectedRole === 'teacher'
+                    ? 'bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+              >
+                I'm an Instructor
+              </button>
+            </div>
+
             <button
-              onClick={signIn}
+              onClick={() => signIn(selectedRole)}
               className="w-full flex items-center justify-center px-6 py-4 border border-gray-300 dark:border-gray-700 rounded-2xl shadow-sm bg-white dark:bg-gray-800 text-lg font-bold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
             >
               <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6 mr-4" />

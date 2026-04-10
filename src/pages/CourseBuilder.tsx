@@ -53,24 +53,31 @@ export default function CourseBuilder() {
           body: formData
         });
         
-        const text = await res.text();
-        let data;
-        try {
-          data = JSON.parse(text);
-        } catch (e) {
-          throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
+        if (!res.ok) {
+          if (res.status === 413) {
+            throw new Error('File is too large. Please upload a smaller file.');
+          }
+          const text = await res.text();
+          try {
+            const errData = JSON.parse(text);
+            throw new Error(errData.error || 'Upload failed');
+          } catch (e) {
+            throw new Error(`Upload failed with status ${res.status}. The file might be too large.`);
+          }
         }
+        
+        const data = await res.json();
 
         if (data.fileId) {
           setFileId(data.fileId);
           setStep(2);
           showToast('File uploaded successfully', 'success');
         } else {
-          showToast('Failed to upload file', 'error');
+          throw new Error(data.error || 'Failed to upload file');
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error(err);
-        showToast('Error uploading file', 'error');
+        showToast(err.message || 'Error uploading file', 'error');
       } finally {
         setIsUploading(false);
       }
@@ -78,23 +85,6 @@ export default function CourseBuilder() {
   };
 
   const handleGenerate = async () => {
-    // Check subscription limits
-    if (profile?.role === 'student' && !profile?.subscription) {
-      try {
-        const coursesRef = collection(db, 'courses');
-        const q = query(coursesRef, where('creatorId', '==', user?.uid));
-        const snap = await getDocs(q);
-        
-        if (snap.size >= 2) {
-          showToast('Free plan limit reached (2 courses). Please upgrade to Pro!', 'error');
-          navigate('/pricing');
-          return;
-        }
-      } catch (err) {
-        console.error('Failed to check course limits:', err);
-      }
-    }
-
     setIsGenerating(true);
     
     // Fake progress animation
@@ -122,22 +112,27 @@ export default function CourseBuilder() {
       courseData.chapters = courseData.chapters.map((c: any) => ({ ...c, batchIndex: 0 }));
 
       // 3. Save the generated course to Firestore
-      const docRef = await addDoc(collection(db, 'courses'), {
-        ...courseData,
-        creatorId: user?.uid,
-        fileId,
-        category,
-        price,
-        difficulty: level,
-        published,
-        rating: 0,
-        createdAt: new Date().toISOString()
-      });
+      let docRef;
+      try {
+        docRef = await addDoc(collection(db, 'courses'), {
+          ...courseData,
+          creatorId: user?.uid,
+          fileId,
+          category,
+          price,
+          difficulty: level,
+          published,
+          rating: 0,
+          createdAt: new Date().toISOString()
+        });
+      } catch (firestoreErr) {
+        handleFirestoreError(firestoreErr, OperationType.CREATE, 'courses');
+      }
       
       clearInterval(interval);
       setProgress(100);
       
-      if (docRef.id) {
+      if (docRef && docRef.id) {
         showToast('Course generated successfully!', 'success');
         setTimeout(() => {
           navigate(`/course/${docRef.id}`);
@@ -148,8 +143,29 @@ export default function CourseBuilder() {
       }
     } catch (err: any) {
       console.error(err);
-      handleFirestoreError(err, OperationType.CREATE, 'courses');
-      showToast(`Error: ${err.message || 'Failed to generate course'}`, 'error');
+      
+      let errorMessage = err.message || 'Failed to generate course';
+      try {
+        const parsed = JSON.parse(errorMessage);
+        if (parsed.error && parsed.error.message) {
+          errorMessage = parsed.error.message;
+        } else if (parsed.error && typeof parsed.error === 'string') {
+          try {
+            const nested = JSON.parse(parsed.error);
+            if (nested.error && nested.error.message) {
+              errorMessage = nested.error.message;
+            } else {
+              errorMessage = parsed.error;
+            }
+          } catch (e) {
+            errorMessage = parsed.error;
+          }
+        }
+      } catch (e) {
+        // Not JSON
+      }
+
+      showToast(`Error: ${errorMessage}`, 'error');
       clearInterval(interval);
       setIsGenerating(false);
     }

@@ -29,7 +29,7 @@ export default function App() {
                 <Route path="discover" element={<Marketplace />} />
                 <Route path="paths" element={<LearningPaths />} />
                 <Route path="course/:courseId" element={<CourseView />} />
-                <Route path="build" element={<ProtectedRoute requiredRole="teacher"><CourseBuilder /></ProtectedRoute>} />
+                <Route path="build" element={<CourseBuilder />} />
                 <Route path="analytics" element={<ProtectedRoute requiredRole="teacher"><InstructorAnalytics /></ProtectedRoute>} />
                 <Route path="studio" element={<ProtectedRoute requiredRole="teacher"><VideoStudio /></ProtectedRoute>} />
                 <Route path="admin" element={<ProtectedRoute requiredRole="admin"><AdminPanel /></ProtectedRoute>} />
