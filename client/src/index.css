@@ -1,0 +1,82 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    @apply font-sans text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-950 antialiased;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display tracking-tight;
+  }
+
+  .dyslexic-friendly {
+    line-height: 1.8 !important;
+    letter-spacing: 0.03em !important;
+    word-spacing: 0.1em !important;
+    font-size: 1.125rem !important;
+  }
+  
+  .dyslexic-friendly p {
+    margin-bottom: 1.5rem !important;
+  }
+  
+  .dyslexic-friendly h1, 
+  .dyslexic-friendly h2, 
+  .dyslexic-friendly h3 {
+    margin-top: 2rem !important;
+    margin-bottom: 1rem !important;
+    letter-spacing: -0.01em !important;
+  }
+
+  .dyslexic-friendly strong {
+    @apply text-indigo-600 font-bold;
+  }
+
+  .dyslexic-friendly ul, 
+  .dyslexic-friendly ol {
+    margin-bottom: 1.5rem !important;
+    padding-left: 1.5rem !important;
+  }
+
+  .dyslexic-friendly li {
+    margin-bottom: 0.75rem !important;
+  }
+}
+
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-slate-200 dark:bg-slate-800 rounded-full;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-300 dark:bg-slate-700;
+  }
+
+  .glass-card {
+    @apply bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 shadow-sm;
+  }
+
+  .saas-shadow {
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  }
+
+  .saas-shadow-hover {
+    @apply transition-all duration-300;
+  }
+  .saas-shadow-hover:hover {
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  }
+}

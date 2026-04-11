@@ -1,0 +1,2446 @@
+openapi: '3.0.3'
+info:
+  title: Lumina API
+  version: '1.0.0'
+  description: |
+    Lumina enterprise learning platform API.
+    All authenticated endpoints require `Authorization: Bearer <access_token>` (KeyCloak OIDC).
+  contact:
+    name: Lumina Engineering
+  license:
+    name: Proprietary
+
+servers:
+  - url: /api/v1
+    description: Versioned API root
+
+# ---------------------------------------------------------------------------
+# Security Schemes
+# ---------------------------------------------------------------------------
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: KeyCloak OIDC access token (5-min TTL, auto-refreshed by oidc-spa)
+
+  # -------------------------------------------------------------------------
+  # Reusable Schemas
+  # -------------------------------------------------------------------------
+  schemas:
+
+    # --- Pagination ---
+    PaginationMeta:
+      type: object
+      required: [cursor, hasMore, total]
+      properties:
+        cursor:
+          type: string
+          nullable: true
+          description: UUID of the last item — pass as `?cursor=` on next request
+        hasMore:
+          type: boolean
+        total:
+          type: integer
+
+    # --- Errors ---
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, status, requestId, timestamp]
+          properties:
+            code:
+              type: string
+              example: COURSE_NOT_FOUND
+            message:
+              type: string
+              example: Course with ID abc123 does not exist
+            status:
+              type: integer
+              example: 404
+            requestId:
+              type: string
+              example: req_7f8a9b2c
+            timestamp:
+              type: string
+              format: date-time
+
+    # --- Users ---
+    Role:
+      type: string
+      enum: [student, teacher, admin]
+
+    User:
+      type: object
+      required: [id, email, role, xp, streak, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        keycloakId:
+          type: string
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        role:
+          $ref: '#/components/schemas/Role'
+        xp:
+          type: integer
+        streak:
+          type: integer
+        lastActive:
+          type: string
+          format: date-time
+          nullable: true
+        preferences:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    UserUpdate:
+      type: object
+      properties:
+        displayName:
+          type: string
+          maxLength: 100
+        preferences:
+          type: object
+          additionalProperties: true
+
+    # --- Courses ---
+    CourseLevel:
+      type: string
+      enum: [beginner, intermediate, advanced]
+
+    CourseStatus:
+      type: string
+      enum: [draft, processing, published, archived]
+
+    Course:
+      type: object
+      required: [id, title, level, status, isMarketplace, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        creatorId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        level:
+          $ref: '#/components/schemas/CourseLevel'
+        category:
+          type: string
+          nullable: true
+        price:
+          type: string
+          description: Decimal string e.g. "29.99"
+        status:
+          $ref: '#/components/schemas/CourseStatus'
+        isMarketplace:
+          type: boolean
+        batchCount:
+          type: integer
+        thumbnailUrl:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CourseCreate:
+      type: object
+      required: [title, level]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+        level:
+          $ref: '#/components/schemas/CourseLevel'
+        category:
+          type: string
+        price:
+          type: string
+          pattern: '^\d+\.\d{2}$'
+          default: '0.00'
+        isMarketplace:
+          type: boolean
+          default: false
+
+    CourseUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        level:
+          $ref: '#/components/schemas/CourseLevel'
+        category:
+          type: string
+        price:
+          type: string
+        status:
+          $ref: '#/components/schemas/CourseStatus'
+        isMarketplace:
+          type: boolean
+
+    # --- Chapters ---
+    Chapter:
+      type: object
+      required: [id, courseId, batchIndex, chapterIndex, title, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        courseId:
+          type: string
+          format: uuid
+        batchIndex:
+          type: integer
+        chapterIndex:
+          type: integer
+        title:
+          type: string
+        content:
+          type: string
+          nullable: true
+        visualMetadata:
+          type: object
+          nullable: true
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+
+    # --- Quiz ---
+    QuizQuestion:
+      type: object
+      required: [id, chapterId, question, options, correctIndex]
+      properties:
+        id:
+          type: string
+          format: uuid
+        chapterId:
+          type: string
+          format: uuid
+        question:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+          minItems: 2
+          maxItems: 6
+        correctIndex:
+          type: integer
+        explanation:
+          type: string
+          nullable: true
+        orderIndex:
+          type: integer
+
+    QuizAttempt:
+      type: object
+      required: [id, userId, chapterId, answers, score, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        chapterId:
+          type: string
+          format: uuid
+        answers:
+          type: array
+          items:
+            type: integer
+        score:
+          type: number
+          format: float
+        createdAt:
+          type: string
+          format: date-time
+
+    QuizSubmit:
+      type: object
+      required: [answers]
+      properties:
+        answers:
+          type: array
+          items:
+            type: integer
+          description: Selected option indices, one per question
+
+    # --- Progress ---
+    Progress:
+      type: object
+      required: [userId, courseId, percentComplete]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        courseId:
+          type: string
+          format: uuid
+        completedChapters:
+          type: array
+          items:
+            type: string
+            format: uuid
+        percentComplete:
+          type: number
+          format: float
+        lastChapterId:
+          type: string
+          format: uuid
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProgressUpdate:
+      type: object
+      required: [completedChapterId]
+      properties:
+        completedChapterId:
+          type: string
+          format: uuid
+
+    # --- Notes ---
+    Note:
+      type: object
+      required: [id, userId, chapterId, content, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        chapterId:
+          type: string
+          format: uuid
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    NoteUpsert:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+
+    # --- AI / Jobs ---
+    GenerateCourseRequest:
+      type: object
+      required: [fileId, config]
+      properties:
+        fileId:
+          type: string
+          format: uuid
+        config:
+          type: object
+          required: [title, level]
+          properties:
+            title:
+              type: string
+            level:
+              $ref: '#/components/schemas/CourseLevel'
+            tone:
+              type: string
+              enum: [academic, casual, professional]
+            category:
+              type: string
+            includeQuizzes:
+              type: boolean
+              default: true
+            includeVisuals:
+              type: boolean
+              default: false
+            batchCount:
+              type: integer
+              minimum: 1
+              maximum: 10
+
+    ExtendCourseRequest:
+      type: object
+      required: [additionalContent]
+      properties:
+        additionalContent:
+          type: string
+        batchCount:
+          type: integer
+          minimum: 1
+          maximum: 5
+
+    RewriteRequest:
+      type: object
+      required: [content, instruction]
+      properties:
+        content:
+          type: string
+        instruction:
+          type: string
+          example: 'Simplify for beginners'
+
+    NarrateRequest:
+      type: object
+      required: [chapterId]
+      properties:
+        chapterId:
+          type: string
+          format: uuid
+        voice:
+          type: string
+          default: alloy
+
+    GenerateVisualRequest:
+      type: object
+      required: [chapterId, prompt]
+      properties:
+        chapterId:
+          type: string
+          format: uuid
+        prompt:
+          type: string
+
+    ChatMessage:
+      type: object
+      required: [id, role, content, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ChatRequest:
+      type: object
+      required: [chapterId, message]
+      properties:
+        chapterId:
+          type: string
+          format: uuid
+        message:
+          type: string
+
+    VideoScriptRequest:
+      type: object
+      required: [chapterId]
+      properties:
+        chapterId:
+          type: string
+          format: uuid
+        style:
+          type: string
+          enum: [explainer, tutorial, documentary]
+          default: explainer
+
+    JobStatus:
+      type: string
+      enum: [queued, active, completed, failed, stalled]
+
+    Job:
+      type: object
+      required: [id, status, createdAt]
+      properties:
+        id:
+          type: string
+        queueName:
+          type: string
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        result:
+          type: object
+          nullable: true
+          additionalProperties: true
+        errorMessage:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    JobAccepted:
+      type: object
+      required: [jobId, statusUrl]
+      properties:
+        jobId:
+          type: string
+        statusUrl:
+          type: string
+          example: /api/v1/jobs/abc123
+
+    # --- Upload ---
+    UploadResponse:
+      type: object
+      required: [fileId, originalName]
+      properties:
+        fileId:
+          type: string
+          format: uuid
+        originalName:
+          type: string
+        sizeBytes:
+          type: integer
+
+    # --- Marketplace ---
+    MarketplaceCourse:
+      type: object
+      required: [id, title, level, price, isMarketplace]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        level:
+          $ref: '#/components/schemas/CourseLevel'
+        category:
+          type: string
+          nullable: true
+        price:
+          type: string
+        thumbnailUrl:
+          type: string
+          nullable: true
+        creatorDisplayName:
+          type: string
+          nullable: true
+        reviewCount:
+          type: integer
+        averageRating:
+          type: number
+          format: float
+          nullable: true
+        isMarketplace:
+          type: boolean
+
+    # --- Cart ---
+    CartItem:
+      type: object
+      required: [courseId, addedAt]
+      properties:
+        courseId:
+          type: string
+          format: uuid
+        course:
+          $ref: '#/components/schemas/MarketplaceCourse'
+        addedAt:
+          type: string
+          format: date-time
+
+    CartAddRequest:
+      type: object
+      required: [courseId]
+      properties:
+        courseId:
+          type: string
+          format: uuid
+
+    # --- Payments ---
+    CheckoutRequest:
+      type: object
+      required: [courseIds]
+      properties:
+        courseIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        couponCode:
+          type: string
+
+    CheckoutResponse:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          description: Stripe Checkout session URL
+
+    Purchase:
+      type: object
+      required: [id, userId, courseId, amount, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        courseId:
+          type: string
+          format: uuid
+        amount:
+          type: string
+        status:
+          type: string
+          enum: [pending, completed, refunded, failed]
+        stripePaymentId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    SubscriptionPlan:
+      type: string
+      enum: [free, pro, enterprise]
+
+    Subscription:
+      type: object
+      required: [userId, plan, status]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        plan:
+          $ref: '#/components/schemas/SubscriptionPlan'
+        status:
+          type: string
+          enum: [active, cancelled, expired, trialing]
+        stripeCustomerId:
+          type: string
+          nullable: true
+        stripeSubscriptionId:
+          type: string
+          nullable: true
+        currentPeriodEnd:
+          type: string
+          format: date-time
+          nullable: true
+
+    SubscriptionCheckoutRequest:
+      type: object
+      required: [plan]
+      properties:
+        plan:
+          $ref: '#/components/schemas/SubscriptionPlan'
+
+    # --- Instructor / Coupons ---
+    Coupon:
+      type: object
+      required: [id, courseId, code, discountPct, expiresAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        courseId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        discountPct:
+          type: integer
+          minimum: 1
+          maximum: 100
+        maxUses:
+          type: integer
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+
+    CouponCreate:
+      type: object
+      required: [courseId, code, discountPct, expiresAt]
+      properties:
+        courseId:
+          type: string
+          format: uuid
+        code:
+          type: string
+          minLength: 3
+          maxLength: 50
+        discountPct:
+          type: integer
+          minimum: 1
+          maximum: 100
+        maxUses:
+          type: integer
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+
+    InstructorAnalytics:
+      type: object
+      required: [totalStudents, totalRevenue, courses]
+      properties:
+        totalStudents:
+          type: integer
+        totalRevenue:
+          type: string
+        courses:
+          type: array
+          items:
+            type: object
+            properties:
+              courseId:
+                type: string
+                format: uuid
+              title:
+                type: string
+              enrollments:
+                type: integer
+              revenue:
+                type: string
+              averageProgress:
+                type: number
+
+    # --- Assignments ---
+    Assignment:
+      type: object
+      required: [id, courseId, title, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        courseId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        dueDate:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    AssignmentCreate:
+      type: object
+      required: [courseId, title]
+      properties:
+        courseId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        dueDate:
+          type: string
+          format: date-time
+
+    Submission:
+      type: object
+      required: [id, assignmentId, studentId, content, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        assignmentId:
+          type: string
+          format: uuid
+        studentId:
+          type: string
+          format: uuid
+        content:
+          type: string
+        grade:
+          type: number
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    SubmissionCreate:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+
+    Review:
+      type: object
+      required: [id, submissionId, reviewerId, rating, comment, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        submissionId:
+          type: string
+          format: uuid
+        reviewerId:
+          type: string
+          format: uuid
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ReviewCreate:
+      type: object
+      required: [rating, comment]
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+          minLength: 1
+
+    # --- Admin ---
+    AdminStats:
+      type: object
+      required: [totalUsers, totalCourses, totalRevenue, activeJobs]
+      properties:
+        totalUsers:
+          type: integer
+        totalCourses:
+          type: integer
+        totalRevenue:
+          type: string
+        activeJobs:
+          type: integer
+        usersByRole:
+          type: object
+          properties:
+            student:
+              type: integer
+            teacher:
+              type: integer
+            admin:
+              type: integer
+
+    # --- Settings ---
+    UserPreferences:
+      type: object
+      properties:
+        theme:
+          type: string
+          enum: [light, dark, system]
+        notifications:
+          type: boolean
+        dyslexicFont:
+          type: boolean
+        language:
+          type: string
+
+    # --- Certificates ---
+    Certificate:
+      type: object
+      required: [id, userId, courseId, verificationCode, issuedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        courseId:
+          type: string
+          format: uuid
+        verificationCode:
+          type: string
+        pdfUrl:
+          type: string
+          nullable: true
+        issuedAt:
+          type: string
+          format: date-time
+
+    # --- Health ---
+    HealthResponse:
+      type: object
+      required: [status, timestamp]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+        timestamp:
+          type: string
+          format: date-time
+        services:
+          type: object
+          properties:
+            database:
+              type: string
+              enum: [ok, down]
+            redis:
+              type: string
+              enum: [ok, down]
+            keycloak:
+              type: string
+              enum: [ok, down]
+
+  # -------------------------------------------------------------------------
+  # Reusable Parameters
+  # -------------------------------------------------------------------------
+  parameters:
+    cursorParam:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: Cursor for pagination (UUID of last item from previous page)
+    limitParam:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    courseIdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  # -------------------------------------------------------------------------
+  # Reusable Responses
+  # -------------------------------------------------------------------------
+  responses:
+    Unauthorized:
+      description: Missing or invalid Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Forbidden:
+      description: Authenticated but insufficient role/ownership
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    ValidationError:
+      description: Request body or params failed Zod validation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+# ---------------------------------------------------------------------------
+# Global security — overridden per-endpoint where Public
+# ---------------------------------------------------------------------------
+security:
+  - bearerAuth: []
+
+# ---------------------------------------------------------------------------
+# PATHS
+# ---------------------------------------------------------------------------
+paths:
+
+  # ==========================================================================
+  # HEALTH
+  # ==========================================================================
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      description: Returns status of DB, Redis, and KeyCloak
+      security: []
+      tags: [Health]
+      responses:
+        '200':
+          description: Platform healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  # ==========================================================================
+  # AUTH
+  # ==========================================================================
+  /auth/login:
+    get:
+      operationId: authLogin
+      summary: Redirect to KeyCloak login
+      security: []
+      tags: [Auth]
+      responses:
+        '302':
+          description: Redirect to KeyCloak OIDC authorization endpoint
+
+  /auth/callback:
+    get:
+      operationId: authCallback
+      summary: OIDC callback — exchange code for tokens
+      security: []
+      tags: [Auth]
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to app dashboard after successful token exchange
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /auth/logout:
+    post:
+      operationId: authLogout
+      summary: Revoke session and tokens
+      tags: [Auth]
+      responses:
+        '204':
+          description: Session revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==========================================================================
+  # USERS
+  # ==========================================================================
+  /users/me:
+    get:
+      operationId: getMe
+      summary: Get current authenticated user
+      tags: [Users]
+      responses:
+        '200':
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    patch:
+      operationId: updateMe
+      summary: Update current user profile
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    delete:
+      operationId: deleteMe
+      summary: Delete account (GDPR cascade)
+      tags: [Users]
+      responses:
+        '204':
+          description: Account deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /users/me/avatar:
+    post:
+      operationId: uploadAvatar
+      summary: Upload user avatar to Supabase Storage
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Avatar uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [avatarUrl]
+                properties:
+                  avatarUrl:
+                    type: string
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==========================================================================
+  # COURSES
+  # ==========================================================================
+  /courses:
+    get:
+      operationId: listMyCourses
+      summary: List authenticated user's courses
+      tags: [Courses]
+      parameters:
+        - $ref: '#/components/parameters/cursorParam'
+        - $ref: '#/components/parameters/limitParam'
+      responses:
+        '200':
+          description: User's courses
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pagination]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Course'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      operationId: createCourse
+      summary: Create a draft course record
+      tags: [Courses]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CourseCreate'
+      responses:
+        '201':
+          description: Draft course created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Course'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /courses/{id}:
+    parameters:
+      - $ref: '#/components/parameters/courseIdParam'
+
+    get:
+      operationId: getCourse
+      summary: Get course (access-controlled by ownership/purchase/subscription)
+      tags: [Courses]
+      responses:
+        '200':
+          description: Course detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Course'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      operationId: updateCourse
+      summary: Update course metadata (owner or admin only)
+      tags: [Courses]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CourseUpdate'
+      responses:
+        '200':
+          description: Updated course
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Course'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      operationId: deleteCourse
+      summary: Delete course (owner or admin)
+      tags: [Courses]
+      responses:
+        '204':
+          description: Course deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /courses/{id}/chapters:
+    parameters:
+      - $ref: '#/components/parameters/courseIdParam'
+
+    get:
+      operationId: listChapters
+      summary: List all chapters of a course
+      tags: [Courses]
+      responses:
+        '200':
+          description: Chapter list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Chapter'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /courses/{id}/chapters/{chapterIndex}:
+    parameters:
+      - $ref: '#/components/parameters/courseIdParam'
+      - name: chapterIndex
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 0
+
+    get:
+      operationId: getChapter
+      summary: Get single chapter content
+      tags: [Courses]
+      responses:
+        '200':
+          description: Chapter with quiz questions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [chapter]
+                properties:
+                  chapter:
+                    $ref: '#/components/schemas/Chapter'
+                  quizQuestions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/QuizQuestion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==========================================================================
+  # FILE UPLOAD
+  # ==========================================================================
+  /upload:
+    post:
+      operationId: uploadFile
+      summary: Upload source file (PDF, MD, TXT, image) for course generation
+      tags: [Upload]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Max 10MB — PDF, MD, TXT, or image
+      responses:
+        '200':
+          description: File processed, fileId returned for generation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          description: File exceeds 10MB limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # ==========================================================================
+  # AI & GENERATION
+  # ==========================================================================
+  /ai/generate-course:
+    post:
+      operationId: generateCourse
+      summary: Queue AI course generation from uploaded file
+      tags: [AI]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateCourseRequest'
+      responses:
+        '202':
+          description: Job queued — poll /jobs/{jobId} for progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobAccepted'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /ai/extend-course/{id}:
+    post:
+      operationId: extendCourse
+      summary: Queue extension of existing course with new content
+      tags: [AI]
+      parameters:
+        - $ref: '#/components/parameters/courseIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtendCourseRequest'
+      responses:
+        '202':
+          description: Extension job queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobAccepted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /ai/rewrite:
+    post:
+      operationId: rewriteContent
+      summary: Queue content rewrite with given instruction
+      tags: [AI]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RewriteRequest'
+      responses:
+        '202':
+          description: Rewrite job queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobAccepted'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /ai/narrate:
+    post:
+      operationId: narrateChapter
+      summary: Queue TTS audio generation for a chapter
+      tags: [AI]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NarrateRequest'
+      responses:
+        '202':
+          description: Narration job queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobAccepted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /ai/generate-visual:
+    post:
+      operationId: generateVisual
+      summary: Queue visual (image/diagram) generation for a chapter
+      tags: [AI]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateVisualRequest'
+      responses:
+        '202':
+          description: Visual generation job queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobAccepted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /ai/chat:
+    post:
+      operationId: aiChat
+      summary: Send message to AI tutor for a chapter
+      tags: [AI]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: AI tutor response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /ai/video-script:
+    post:
+      operationId: generateVideoScript
+      summary: Queue video script generation (teacher+)
+      tags: [AI]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VideoScriptRequest'
+      responses:
+        '202':
+          description: Script generation job queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobAccepted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ==========================================================================
+  # JOBS
+  # ==========================================================================
+  /jobs/{id}:
+    get:
+      operationId: getJob
+      summary: Get BullMQ job status and result
+      tags: [Jobs]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /jobs/{id}/stream:
+    get:
+      operationId: streamJob
+      summary: SSE stream for real-time job progress
+      tags: [Jobs]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==========================================================================
+  # MARKETPLACE
+  # ==========================================================================
+  /marketplace:
+    get:
+      operationId: browseMarketplace
+      summary: Browse and search marketplace courses
+      tags: [Marketplace]
+      parameters:
+        - $ref: '#/components/parameters/cursorParam'
+        - $ref: '#/components/parameters/limitParam'
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: Search query
+        - name: level
+          in: query
+          schema:
+            $ref: '#/components/schemas/CourseLevel'
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: maxPrice
+          in: query
+          schema:
+            type: number
+      responses:
+        '200':
+          description: Marketplace course listing
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pagination]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarketplaceCourse'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /marketplace/{id}:
+    get:
+      operationId: getMarketplaceCourse
+      summary: Course preview — full content only for purchasers/subscribers
+      tags: [Marketplace]
+      parameters:
+        - $ref: '#/components/parameters/courseIdParam'
+      responses:
+        '200':
+          description: Course preview (outline for unpurchased paid courses)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketplaceCourse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==========================================================================
+  # CART
+  # ==========================================================================
+  /cart:
+    get:
+      operationId: getCart
+      summary: Get current user's cart
+      tags: [Cart]
+      responses:
+        '200':
+          description: Cart items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CartItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      operationId: addToCart
+      summary: Add course to cart
+      tags: [Cart]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CartAddRequest'
+      responses:
+        '201':
+          description: Item added to cart
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartItem'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Course already in cart
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /cart/{courseId}:
+    delete:
+      operationId: removeFromCart
+      summary: Remove course from cart
+      tags: [Cart]
+      parameters:
+        - name: courseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Removed from cart
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==========================================================================
+  # PAYMENTS
+  # ==========================================================================
+  /checkout:
+    post:
+      operationId: createCheckout
+      summary: Create Stripe Checkout session for cart items
+      tags: [Payments]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutRequest'
+      responses:
+        '200':
+          description: Checkout session URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /webhooks/stripe:
+    post:
+      operationId: stripeWebhook
+      summary: Stripe webhook handler
+      security: []
+      tags: [Payments]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook received
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+        '400':
+          description: Invalid signature or payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /billing:
+    get:
+      operationId: getBillingHistory
+      summary: Get purchase history
+      tags: [Payments]
+      parameters:
+        - $ref: '#/components/parameters/cursorParam'
+        - $ref: '#/components/parameters/limitParam'
+      responses:
+        '200':
+          description: Purchase history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pagination]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Purchase'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /billing/{id}/receipt:
+    get:
+      operationId: downloadReceipt
+      summary: Download PDF receipt for a purchase
+      tags: [Payments]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: PDF receipt
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /subscriptions:
+    post:
+      operationId: createSubscription
+      summary: Create subscription checkout session
+      tags: [Payments]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionCheckoutRequest'
+      responses:
+        '200':
+          description: Stripe checkout URL for subscription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /subscriptions/me:
+    get:
+      operationId: getMySubscription
+      summary: Get current user's subscription
+      tags: [Payments]
+      responses:
+        '200':
+          description: Current subscription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==========================================================================
+  # PROGRESS & LEARNING
+  # ==========================================================================
+  /progress:
+    get:
+      operationId: getAllProgress
+      summary: Get progress for all user's courses
+      tags: [Progress]
+      responses:
+        '200':
+          description: All course progress records
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Progress'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /progress/{courseId}:
+    parameters:
+      - name: courseId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      operationId: getCourseProgress
+      summary: Get progress for a specific course
+      tags: [Progress]
+      responses:
+        '200':
+          description: Course progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Progress'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      operationId: updateProgress
+      summary: Mark a chapter as completed
+      tags: [Progress]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProgressUpdate'
+      responses:
+        '200':
+          description: Updated progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Progress'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /quizzes/{chapterId}/attempt:
+    post:
+      operationId: submitQuizAttempt
+      summary: Submit quiz answers for a chapter
+      tags: [Progress]
+      parameters:
+        - name: chapterId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuizSubmit'
+      responses:
+        '200':
+          description: Quiz result with score
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizAttempt'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==========================================================================
+  # NOTES
+  # ==========================================================================
+  /notes/{chapterId}:
+    parameters:
+      - name: chapterId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      operationId: getNotes
+      summary: Get notes for a chapter
+      tags: [Notes]
+      responses:
+        '200':
+          description: Chapter notes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Note'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      operationId: upsertNote
+      summary: Create or update note for a chapter
+      tags: [Notes]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteUpsert'
+      responses:
+        '200':
+          description: Created or updated note
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notes/note/{noteId}:
+    delete:
+      operationId: deleteNote
+      summary: Delete a note by ID
+      tags: [Notes]
+      parameters:
+        - name: noteId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Note deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==========================================================================
+  # INSTRUCTOR
+  # ==========================================================================
+  /instructor/analytics:
+    get:
+      operationId: getInstructorAnalytics
+      summary: Instructor dashboard — enrollments, revenue, course stats
+      tags: [Instructor]
+      responses:
+        '200':
+          description: Instructor analytics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstructorAnalytics'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /instructor/coupons:
+    get:
+      operationId: listCoupons
+      summary: List instructor's coupons
+      tags: [Instructor]
+      responses:
+        '200':
+          description: Coupon list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Coupon'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      operationId: createCoupon
+      summary: Create a discount coupon for a course
+      tags: [Instructor]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CouponCreate'
+      responses:
+        '201':
+          description: Coupon created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Coupon'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ==========================================================================
+  # ASSIGNMENTS
+  # ==========================================================================
+  /assignments:
+    post:
+      operationId: createAssignment
+      summary: Create assignment for a course (teacher+)
+      tags: [Assignments]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignmentCreate'
+      responses:
+        '201':
+          description: Assignment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assignment'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /assignments/{courseId}:
+    get:
+      operationId: listAssignments
+      summary: List assignments for a course
+      tags: [Assignments]
+      parameters:
+        - name: courseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Assignments list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Assignment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /assignments/{id}/submit:
+    post:
+      operationId: submitAssignment
+      summary: Submit work for an assignment (student)
+      tags: [Assignments]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmissionCreate'
+      responses:
+        '201':
+          description: Submission recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Submission'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Already submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /submissions/{id}/review:
+    post:
+      operationId: reviewSubmission
+      summary: Submit peer review for an assignment submission
+      tags: [Assignments]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewCreate'
+      responses:
+        '201':
+          description: Review submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Already reviewed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  # ==========================================================================
+  # ADMIN
+  # ==========================================================================
+  /admin/stats:
+    get:
+      operationId: getAdminStats
+      summary: Platform-wide statistics (admin only)
+      tags: [Admin]
+      responses:
+        '200':
+          description: Admin stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminStats'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/data:
+    delete:
+      operationId: clearAllData
+      summary: Clear all platform data (admin only — requires confirmation header)
+      tags: [Admin]
+      parameters:
+        - name: X-Confirm-Clear
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: ['YES_DELETE_EVERYTHING']
+      responses:
+        '204':
+          description: All data cleared
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/queues:
+    get:
+      operationId: getBullBoard
+      summary: Bull Board queue dashboard proxy (admin only)
+      tags: [Admin]
+      responses:
+        '200':
+          description: Bull Board HTML dashboard
+          content:
+            text/html:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ==========================================================================
+  # SETTINGS
+  # ==========================================================================
+  /settings:
+    get:
+      operationId: getSettings
+      summary: Get user preferences
+      tags: [Settings]
+      responses:
+        '200':
+          description: User preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPreferences'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    patch:
+      operationId: updateSettings
+      summary: Update user preferences
+      tags: [Settings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserPreferences'
+      responses:
+        '200':
+          description: Updated preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPreferences'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /settings/reset-password:
+    post:
+      operationId: resetPassword
+      summary: Trigger KeyCloak password reset email
+      tags: [Settings]
+      responses:
+        '204':
+          description: Password reset email sent
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==========================================================================
+  # CERTIFICATES
+  # ==========================================================================
+  /certificates/{courseId}:
+    post:
+      operationId: generateCertificate
+      summary: Generate completion certificate for a course
+      tags: [Certificates]
+      parameters:
+        - name: courseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Certificate generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Certificate'
+        '400':
+          description: Course not completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Certificate already issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /certificates/verify/{code}:
+    get:
+      operationId: verifyCertificate
+      summary: Publicly verify a certificate by code
+      security: []
+      tags: [Certificates]
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Certificate valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Certificate'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+# ---------------------------------------------------------------------------
+# Tags (for grouping in Swagger UI / Orval)
+# ---------------------------------------------------------------------------
+tags:
+  - name: Health
+  - name: Auth
+  - name: Users
+  - name: Courses
+  - name: Upload
+  - name: AI
+  - name: Jobs
+  - name: Marketplace
+  - name: Cart
+  - name: Payments
+  - name: Progress
+  - name: Notes
+  - name: Instructor
+  - name: Assignments
+  - name: Admin
+  - name: Settings
+  - name: Certificates

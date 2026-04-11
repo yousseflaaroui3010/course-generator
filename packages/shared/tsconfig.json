@@ -8,12 +8,10 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "composite": true,
+    "outDir": "./dist",
+    "rootDir": "./src"
   },
-  "files": [],
-  "references": [
-    { "path": "./server" },
-    { "path": "./client" },
-    { "path": "./packages/shared" }
-  ]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
 }

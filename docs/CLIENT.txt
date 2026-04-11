@@ -1,0 +1,34 @@
+# CLIENT BRIEF
+# Source of truth — PM-only edits
+# Paste the client's verbatim words below this line.
+# ---
+
+## PROJECT VISION
+
+We're building a giant learning platform like Coursera, Udemy, and Saylor — a comprehensive course delivery and creation system.
+
+### PLATFORM CAPABILITIES
+
+**Core Course Experience:**
+- Courses with rich media: visuals, quizzes, narration, and videos (videos to be added later using Remotion for animation)
+- Professional course content delivery similar to tier-1 learning platforms
+
+**Student Course Builder (Key Differentiator):**
+- Students can create their own courses from existing sources:
+  - PDF files
+  - Markdown (.md) files
+  - Text files (.txt)
+  - YouTube URLs (using transcript extraction)
+- The platform automatically generates visuals related to each chapter and lesson as needed
+- Diagrams: Use Excalidraw for Mermaid diagrams instead of basic shapes
+
+### SUCCESS CRITERIA (From Existing Build)
+- Multi-role support: Students, Instructors, Admins (evidenced by StudentDashboard, TutorDashboard, AdminPanel in codebase)
+- Authentication & authorization (Firebase integration)
+- Payment processing (Stripe integration)
+- AI-powered features (OpenAI/Gemini integration for content generation)
+- Marketplace for course discovery
+
+### FUTURE ENHANCEMENTS
+- Video generation with Remotion (animation library)
+- Enhanced visual generation across courses

@@ -1,8 +1,37 @@
 node_modules/
-build/
+
+# Build outputs
 dist/
+build/
+server/dist/
+client/dist/
+packages/*/dist/
+
+# Generated files (Orval API client output)
+**/*.generated.ts
+openapi/generated/
+
+# Drizzle migration artifacts (keep migrations/, ignore journal)
+drizzle/.drizzle/
+
+# Test coverage
 coverage/
+
+# Environment (never commit real secrets)
+.env
+.env.local
+.env.*.local
+
+# Local docker overrides
+docker-compose.override.yml
+
+# Editor / OS
 .DS_Store
 *.log
-.env*
-!.env.example
+.vscode/settings.json
+
+# Uploads (local dev only)
+uploads/
+
+# Firebase (prototype — do not extend)
+firebase-applet-config.json

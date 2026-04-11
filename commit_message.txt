@@ -1,0 +1,29 @@
+﻿feat: Initialize Lumina project structure, documentation, and tech stack
+
+This commit establishes the foundational monorepo structure, infrastructure configurations, and extensive documentation for the Lumina enterprise learning platform.
+
+### Core Changes & Scaffolding:
+- **Monorepo Setup**: Configured PNPM workspaces with server, client, and packages/shared. Updated root package.json and 	sconfig.json.
+- **Infrastructure**: Added docker-compose.yml for local development featuring PostgreSQL 16, Redis 7, and Keycloak 26.5.
+- **Environment**: Updated .env.example and .gitignore to reflect the new tech stack requirements and ignored files.
+- **API Contracts**: Introduced openapi/lumina-api.yaml as the source of truth and orval.config.ts for auto-generating type-safe React Query hooks.
+
+### Frontend (client/):
+- Initialized React 19 + Vite app with Tailwind CSS v4 and Radix UI.
+- Set up routing and core pages (Dashboard, CourseView, CourseBuilder, Marketplace, VideoStudio, AdminPanel, Settings, etc.).
+- Configured Zustand for state management (cartStore.ts).
+- Added authentication context and Firebase/Keycloak integration outlines.
+
+### Backend (server/):
+- Scaffolding for Express.js API with Drizzle ORM and PostgreSQL.
+- Database schema definitions (users, courses, chapters, progress, payments, media, jobs, etc.).
+- Authentication middleware for Keycloak token introspection and RBAC (equireRole).
+- Comprehensive unit and integration test scaffolding (Vitest) for DB and Auth.
+
+### Documentation & AI Tooling:
+- **Product Docs**: Added PRD, Tech Blueprint, Sprint Plan, BA Research Report, and logs to docs/.
+- **Claude Code**: Configured .claude/ with specific phase-based skills (phase1 to phase8), rules, and project orchestrator guides (CLAUDE.md, CLAUDE_CODE_ARCHITECTURE_GUIDE_v1.0.md).
+
+### Configurations:
+- Added keycloak/lumina-realm.json for local Keycloak seeding.
+- Added pnpm-workspace.yaml and generated pnpm-lock.yaml.

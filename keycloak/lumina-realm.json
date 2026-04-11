@@ -1,0 +1,137 @@
+{
+  "realm": "lumina",
+  "enabled": true,
+  "displayName": "Lumina Learning Platform",
+  "displayNameHtml": "<b>Lumina</b>",
+  "loginTheme": "keycloak",
+  "accountTheme": "keycloak.v3",
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "rememberMe": true,
+  "verifyEmail": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+
+  "accessTokenLifespan": 300,
+  "refreshTokenMaxReuse": 0,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 28800,
+  "offlineSessionIdleTimeout": 2592000,
+
+  "roles": {
+    "realm": [
+      { "name": "student",  "description": "Standard learner role" },
+      { "name": "teacher",  "description": "Course creator / instructor role" },
+      { "name": "admin",    "description": "Platform administrator role" }
+    ]
+  },
+
+  "defaultRoles": ["student"],
+
+  "clients": [
+    {
+      "clientId": "lumina-spa",
+      "name": "Lumina SPA",
+      "description": "React SPA — public client with PKCE",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:5173/*",
+        "https://lumina.app/*",
+        "https://staging.lumina.app/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://lumina.app",
+        "https://staging.lumina.app"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "access.token.lifespan": "300",
+        "client.session.idle.timeout": "1800",
+        "client.session.max.lifespan": "28800"
+      },
+      "defaultClientScopes": ["openid", "profile", "email", "roles"]
+    },
+    {
+      "clientId": "lumina-api",
+      "name": "Lumina API",
+      "description": "Express API — confidential client for token introspection",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "protocol": "openid-connect",
+      "secret": "${KC_LUMINA_API_SECRET}",
+      "attributes": {}
+    }
+  ],
+
+  "identityProviders": [
+    {
+      "alias": "google",
+      "displayName": "Google",
+      "providerId": "google",
+      "enabled": true,
+      "updateProfileFirstLoginMode": "on",
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "authenticateByDefault": false,
+      "linkOnly": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "clientId": "${GOOGLE_CLIENT_ID}",
+        "clientSecret": "${GOOGLE_CLIENT_SECRET}",
+        "syncMode": "IMPORT",
+        "useJwksUrl": "true",
+        "loginHint": "false",
+        "hostedDomain": "",
+        "userIp": "false",
+        "offlineAccess": "false"
+      }
+    }
+  ],
+
+  "clientScopes": [
+    {
+      "name": "roles",
+      "description": "OpenID Connect scope for add user roles to the access token",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "false",
+        "display.on.consent.screen": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "user.attribute": "foo",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ]
+}
