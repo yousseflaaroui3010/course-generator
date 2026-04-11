@@ -5,8 +5,9 @@ import Markdown from 'react-markdown';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, LineChart, Line } from 'recharts';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db, storage, handleFirestoreError, OperationType } from '../firebase';
 import { doc, getDoc, setDoc, onSnapshot, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { geminiService } from '../services/gemini';
 import AssignmentsTab from '../components/AssignmentsTab';
 import CertificateModal from '../components/CertificateModal';
@@ -263,8 +264,29 @@ export default function CourseView() {
     if (!course) return;
     setIsDownloading(true);
     try {
-      // 1. Save course data to localStorage
-      localStorage.setItem(`offline_course_${course.id}`, JSON.stringify(course));
+      // 1. Save course data to IndexedDB
+      await new Promise((resolve, reject) => {
+        const request = indexedDB.open('LuminaOfflineDB', 1);
+        
+        request.onupgradeneeded = (event: any) => {
+          const db = event.target.result;
+          if (!db.objectStoreNames.contains('courses')) {
+            db.createObjectStore('courses', { keyPath: 'id' });
+          }
+        };
+        
+        request.onsuccess = (event: any) => {
+          const db = event.target.result;
+          const transaction = db.transaction(['courses'], 'readwrite');
+          const store = transaction.objectStore('courses');
+          const putRequest = store.put({ id: course.id, data: course });
+          
+          putRequest.onsuccess = () => resolve(true);
+          putRequest.onerror = () => reject(putRequest.error);
+        };
+        
+        request.onerror = () => reject(request.error);
+      });
 
       // 2. Cache media files (images, videos)
       if ('caches' in window) {
@@ -273,7 +295,6 @@ export default function CourseView() {
 
         course.chapters?.forEach((ch: any) => {
           if (ch.videoUrl) urlsToCache.push(ch.videoUrl);
-          // We could also extract image URLs from markdown content here if needed
         });
 
         if (urlsToCache.length > 0) {
@@ -451,47 +472,21 @@ export default function CourseView() {
     }
 
     setIsUploadingVideo(true);
-    const formData = new FormData();
-    formData.append('file', file);
 
     try {
-      // For this demo, we use the same upload endpoint which returns a fileId
-      // In a real app, you'd upload to Firebase Storage
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData
+      const storageRef = ref(storage, `courses/${course.id}/chapters/${activeChapterIndex}/${file.name}`);
+      await uploadBytes(storageRef, file);
+      const videoUrl = await getDownloadURL(storageRef);
+
+      const updatedChapters = [...course.chapters];
+      updatedChapters[activeChapterIndex].videoUrl = videoUrl;
+      
+      await updateDoc(doc(db, 'courses', course.id), {
+        chapters: updatedChapters
       });
       
-      if (!res.ok) {
-        if (res.status === 413) {
-          throw new Error('File is too large. Please upload a smaller file.');
-        }
-        const text = await res.text();
-        try {
-          const errData = JSON.parse(text);
-          throw new Error(errData.error || 'Upload failed');
-        } catch (e) {
-          throw new Error(`Upload failed with status ${res.status}. The file might be too large.`);
-        }
-      }
-      
-      const data = await res.json();
-
-      if (data.fileId) {
-        const updatedChapters = [...course.chapters];
-        // We'll use a mock URL for the video player since we don't have a real streaming server
-        // In a real app, this would be the URL from Firebase Storage
-        updatedChapters[activeChapterIndex].videoUrl = `/api/files/${data.fileId}`;
-        
-        await updateDoc(doc(db, 'courses', course.id), {
-          chapters: updatedChapters
-        });
-        
-        setCourse({ ...course, chapters: updatedChapters });
-        showToast('Video uploaded successfully', 'success');
-      } else {
-        throw new Error(data.error || 'Failed to upload video');
-      }
+      setCourse({ ...course, chapters: updatedChapters });
+      showToast('Video uploaded successfully', 'success');
     } catch (err: any) {
       console.error('Video upload failed:', err);
       showToast(err.message || 'Failed to upload video', 'error');
@@ -1199,7 +1194,9 @@ export default function CourseView() {
                     ? 'bg-indigo-600 text-white rounded-br-sm' 
                     : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200 rounded-bl-sm shadow-sm'
                 }`}>
-                  <Markdown className="text-sm prose-sm dark:prose-invert max-w-none">{msg.text}</Markdown>
+                  <div className="text-sm prose-sm dark:prose-invert max-w-none">
+                    <Markdown>{msg.text}</Markdown>
+                  </div>
                 </div>
               </div>
             ))}

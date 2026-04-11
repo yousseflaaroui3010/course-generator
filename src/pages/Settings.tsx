@@ -4,16 +4,23 @@ import { useToast } from '../components/Toast';
 import { useTheme } from '../components/ThemeProvider';
 import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { CheckCircle2 } from 'lucide-react';
+import { auth, db, storage, handleFirestoreError, OperationType } from '../firebase';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { updateProfile, sendPasswordResetEmail, deleteUser } from 'firebase/auth';
 
 export default function Settings() {
   const { showToast } = useToast();
   const { theme, setTheme } = useTheme();
   const { user, profile: userProfile } = useAuth();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('profile');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
 
   useEffect(() => {
     if (searchParams.get('session_id')) {
@@ -24,44 +31,159 @@ export default function Settings() {
 
   // Profile State
   const [profile, setProfile] = useState({
-    name: 'Youssef Laaroui',
-    email: 'yousseflaaroui1@gmail.com',
-    bio: 'Senior Software Engineer passionate about AI and education.',
-    avatar: 'https://picsum.photos/seed/youssef/200/200',
+    name: userProfile?.displayName || 'Student',
+    email: userProfile?.email || '',
+    headline: '',
+    bio: '',
+    avatar: userProfile?.photoURL || `https://ui-avatars.com/api/?name=${userProfile?.displayName || 'User'}`,
   });
 
   // Preferences State
   const [preferences, setPreferences] = useState({
     language: 'English',
-    notifications: {
-      email: true,
-      push: false,
-      courseUpdates: true,
-    },
+    topics: ['Engineering', 'AI & Machine Learning'],
+    emailNotifications: true,
+    weeklyReminders: false,
   });
+
+  useEffect(() => {
+    if (!user) return;
+    
+    const fetchUserData = async () => {
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          setProfile(prev => ({
+            ...prev,
+            name: data.name || userProfile?.displayName || '',
+            headline: data.headline || '',
+            bio: data.bio || '',
+            avatar: data.avatar || userProfile?.photoURL || `https://ui-avatars.com/api/?name=${userProfile?.displayName || 'User'}`,
+          }));
+          if (data.preferences) {
+            setPreferences(prev => ({
+              ...prev,
+              ...data.preferences,
+              topics: data.preferences.topics || []
+            }));
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch user data:", error);
+      }
+    };
+    
+    fetchUserData();
+  }, [user, userProfile]);
+
+  const availableTopics = [
+    'Leadership', 'Engineering', 'Design', 'Marketing', 
+    'Data Science', 'Business', 'AI & Machine Learning', 'Product Management'
+  ];
+
+  const handleToggleTopic = (topic: string) => {
+    setPreferences(prev => {
+      const currentTopics = prev.topics || [];
+      return {
+        ...prev,
+        topics: currentTopics.includes(topic)
+          ? currentTopics.filter(t => t !== topic)
+          : [...currentTopics, topic]
+      };
+    });
+  };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
+    
     setIsSaving(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setIsSaving(false);
-    showToast('Profile updated successfully', 'success');
+    try {
+      let avatarUrl = profile.avatar;
+      
+      if (avatarFile) {
+        const storageRef = ref(storage, `avatars/${user.uid}`);
+        await uploadBytes(storageRef, avatarFile);
+        avatarUrl = await getDownloadURL(storageRef);
+        
+        await updateProfile(user, {
+          displayName: profile.name,
+          photoURL: avatarUrl
+        });
+      } else if (profile.name !== userProfile?.displayName) {
+        await updateProfile(user, {
+          displayName: profile.name
+        });
+      }
+
+      await setDoc(doc(db, 'users', user.uid), {
+        name: profile.name,
+        headline: profile.headline,
+        bio: profile.bio,
+        avatar: avatarUrl,
+        updatedAt: new Date()
+      }, { merge: true });
+
+      setProfile(prev => ({ ...prev, avatar: avatarUrl }));
+      setAvatarFile(null);
+      showToast('Profile updated successfully', 'success');
+    } catch (error: any) {
+      console.error(error);
+      const message = error.message || 'Failed to update profile';
+      showToast(message, 'error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleSavePreferences = async () => {
+    if (!user) return;
     setIsSaving(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setIsSaving(false);
-    showToast('Preferences saved', 'success');
+    try {
+      await setDoc(doc(db, 'users', user.uid), {
+        preferences
+      }, { merge: true });
+      showToast('Preferences saved successfully', 'success');
+    } catch (error: any) {
+      console.error(error);
+      const message = error.message || 'Failed to save preferences';
+      showToast(message, 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleUpdatePassword = async () => {
+    if (!user?.email) return;
+    try {
+      await sendPasswordResetEmail(auth, user.email);
+      showToast('Password reset email sent. Please check your inbox.', 'success');
+    } catch (error) {
+      showToast('Failed to send password reset email', 'error');
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'users', user.uid));
+      await deleteUser(user);
+      showToast('Account deleted successfully', 'success');
+      navigate('/login');
+    } catch (error: any) {
+      if (error.code === 'auth/requires-recent-login') {
+        showToast('Please sign out and sign in again before deleting your account.', 'warning');
+      } else {
+        showToast('Failed to delete account.', 'error');
+      }
+    }
   };
 
   const tabs = [
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'subscription', label: 'Subscription', icon: CreditCard },
     { id: 'preferences', label: 'Preferences', icon: SettingsIcon },
-    { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'security', label: 'Security', icon: Shield },
   ];
 
@@ -126,10 +248,10 @@ export default function Settings() {
                           onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) {
+                              setAvatarFile(file);
                               const reader = new FileReader();
                               reader.onloadend = () => {
                                 setProfile({ ...profile, avatar: reader.result as string });
-                                showToast('Avatar updated locally', 'success');
                               };
                               reader.readAsDataURL(file);
                             }
@@ -156,7 +278,10 @@ export default function Settings() {
                           </button>
                           <button 
                             type="button" 
-                            onClick={() => setProfile({ ...profile, avatar: 'https://picsum.photos/seed/default/200/200' })}
+                            onClick={() => {
+                              setProfile({ ...profile, avatar: `https://ui-avatars.com/api/?name=${profile.name}` });
+                              setAvatarFile(null);
+                            }}
                             className="text-sm font-medium text-red-600 dark:text-red-400 hover:text-red-500"
                           >
                             Remove
@@ -173,6 +298,16 @@ export default function Settings() {
                           value={profile.name}
                           onChange={(e) => setProfile({ ...profile, name: e.target.value })}
                           className="w-full border-gray-300 dark:border-gray-700 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2.5 border dark:bg-gray-800 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title / Headline</label>
+                        <input
+                          type="text"
+                          value={profile.headline}
+                          onChange={(e) => setProfile({ ...profile, headline: e.target.value })}
+                          className="w-full border-gray-300 dark:border-gray-700 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2.5 border dark:bg-gray-800 dark:text-white"
+                          placeholder="e.g. Senior Software Engineer"
                         />
                       </div>
                       <div>
@@ -296,8 +431,77 @@ export default function Settings() {
                   className="space-y-8"
                 >
                   <div>
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6">App Preferences</h2>
+                    <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Learning Preferences</h2>
                     <div className="space-y-8">
+                      {/* Topics of Interest */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Topics of Interest</label>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Select topics to get personalized course recommendations.</p>
+                        <div className="flex flex-wrap gap-2">
+                          {availableTopics.map(topic => (
+                            <button
+                              key={topic}
+                              onClick={() => handleToggleTopic(topic)}
+                              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors border ${
+                                (preferences.topics || []).includes(topic)
+                                  ? 'bg-indigo-100 border-indigo-200 text-indigo-700 dark:bg-indigo-900/40 dark:border-indigo-800 dark:text-indigo-300'
+                                  : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700'
+                              }`}
+                            >
+                              {topic}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <hr className="border-gray-200 dark:border-gray-800" />
+
+                      {/* Notifications */}
+                      <div>
+                        <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Notifications & Reminders</h3>
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-700">
+                            <div>
+                              <p className="font-medium text-gray-900 dark:text-white">Email Notifications</p>
+                              <p className="text-sm text-gray-500 dark:text-gray-400">Receive updates, recommendations, and news via email.</p>
+                            </div>
+                            <button
+                              onClick={() => setPreferences({ ...preferences, emailNotifications: !preferences.emailNotifications })}
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                                preferences.emailNotifications ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-700'
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                  preferences.emailNotifications ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                              />
+                            </button>
+                          </div>
+
+                          <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-700">
+                            <div>
+                              <p className="font-medium text-gray-900 dark:text-white">Weekly Learning Reminders</p>
+                              <p className="text-sm text-gray-500 dark:text-gray-400">Get a weekly nudge to keep up with your learning goals.</p>
+                            </div>
+                            <button
+                              onClick={() => setPreferences({ ...preferences, weeklyReminders: !preferences.weeklyReminders })}
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                                preferences.weeklyReminders ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-700'
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                  preferences.weeklyReminders ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <hr className="border-gray-200 dark:border-gray-800" />
+
                       {/* Theme Selection */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">Appearance</label>
@@ -357,52 +561,6 @@ export default function Settings() {
                 </motion.div>
               )}
 
-              {activeTab === 'notifications' && (
-                <motion.div
-                  key="notifications"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  className="space-y-8"
-                >
-                  <div>
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Notifications</h2>
-                    <div className="space-y-6">
-                      {[
-                        { id: 'email', label: 'Email Notifications', desc: 'Receive updates via your registered email.' },
-                        { id: 'push', label: 'Push Notifications', desc: 'Get real-time alerts in your browser.' },
-                        { id: 'courseUpdates', label: 'Course Updates', desc: 'Get notified when your courses are ready.' },
-                      ].map((item) => (
-                        <div key={item.id} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-700">
-                          <div>
-                            <p className="font-medium text-gray-900 dark:text-white">{item.label}</p>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">{item.desc}</p>
-                          </div>
-                          <button
-                            onClick={() => setPreferences({
-                              ...preferences,
-                              notifications: {
-                                ...preferences.notifications,
-                                [item.id]: !preferences.notifications[item.id as keyof typeof preferences.notifications]
-                              }
-                            })}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-                              preferences.notifications[item.id as keyof typeof preferences.notifications] ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-700'
-                            }`}
-                          >
-                            <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                preferences.notifications[item.id as keyof typeof preferences.notifications] ? 'translate-x-6' : 'translate-x-1'
-                              }`}
-                            />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-
               {activeTab === 'security' && (
                 <motion.div
                   key="security"
@@ -420,18 +578,45 @@ export default function Settings() {
                           <h3 className="font-medium text-gray-900 dark:text-white">Change Password</h3>
                         </div>
                         <p className="text-sm text-gray-500 dark:text-gray-400">Update your password to keep your account secure.</p>
-                        <button className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-500">
-                          Update password →
+                        <button 
+                          onClick={handleUpdatePassword}
+                          className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-500"
+                        >
+                          Send password reset email →
                         </button>
                       </div>
 
-                      <div className="p-6 border border-red-100 dark:border-red-900/30 bg-red-50 dark:bg-red-900/10 rounded-xl space-y-4">
-                        <h3 className="font-medium text-red-900 dark:text-red-400">Danger Zone</h3>
-                        <p className="text-sm text-red-700 dark:text-red-300/70">Once you delete your account, there is no going back. Please be certain.</p>
-                        <button className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors">
-                          Delete Account
-                        </button>
-                      </div>
+                      {showDeleteConfirm ? (
+                        <div className="p-6 border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 rounded-xl space-y-4">
+                          <h3 className="font-medium text-red-900 dark:text-red-400">Are you absolutely sure?</h3>
+                          <p className="text-sm text-red-700 dark:text-red-300/70">This action cannot be undone. This will permanently delete your account and remove your data from our servers.</p>
+                          <div className="flex space-x-3">
+                            <button 
+                              onClick={handleDeleteAccount}
+                              className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
+                            >
+                              Yes, delete my account
+                            </button>
+                            <button 
+                              onClick={() => setShowDeleteConfirm(false)}
+                              className="px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-6 border border-red-100 dark:border-red-900/30 bg-red-50 dark:bg-red-900/10 rounded-xl space-y-4">
+                          <h3 className="font-medium text-red-900 dark:text-red-400">Danger Zone</h3>
+                          <p className="text-sm text-red-700 dark:text-red-300/70">Once you delete your account, there is no going back. Please be certain.</p>
+                          <button 
+                            onClick={() => setShowDeleteConfirm(true)}
+                            className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
+                          >
+                            Delete Account
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </motion.div>

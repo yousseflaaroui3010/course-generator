@@ -73,6 +73,7 @@ service cloud.firestore {
                      (request.resource.data.role == 'admin' && request.auth.token.email == "yousseflaaroui1@gmail.com"));
       allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
                     (request.resource.data.role == resource.data.role || isAdmin());
+      allow delete: if isOwner(userId) || isAdmin();
 
     match /users/{userId}/progress/{courseId} {
       allow read: if isOwner(userId) || 

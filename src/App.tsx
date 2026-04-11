@@ -11,10 +11,14 @@ import LoginPage from './pages/LoginPage';
 import Pricing from './pages/Pricing';
 import LearningPaths from './pages/LearningPaths';
 import InstructorAnalytics from './pages/InstructorAnalytics';
+import Billing from './pages/Billing';
 import ProtectedRoute from './components/ProtectedRoute';
 import { ToastProvider } from './components/Toast';
 import { ThemeProvider } from './components/ThemeProvider';
 import { AuthProvider } from './contexts/AuthContext';
+
+// Placeholder components for new routes
+const CartPlaceholder = () => <div className="p-8 text-center"><h1 className="text-2xl font-display font-bold mb-4">Shopping Cart</h1><p className="text-slate-500">Cart functionality coming soon in Epic 3.</p></div>;
 
 export default function App() {
   return (
@@ -28,6 +32,8 @@ export default function App() {
                 <Route index element={<Dashboard />} />
                 <Route path="discover" element={<Marketplace />} />
                 <Route path="paths" element={<LearningPaths />} />
+                <Route path="cart" element={<CartPlaceholder />} />
+                <Route path="billing" element={<Billing />} />
                 <Route path="course/:courseId" element={<CourseView />} />
                 <Route path="build" element={<CourseBuilder />} />
                 <Route path="analytics" element={<ProtectedRoute requiredRole="teacher"><InstructorAnalytics /></ProtectedRoute>} />

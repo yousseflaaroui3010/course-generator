@@ -14,18 +14,13 @@ import Stripe from 'stripe';
 // Load environment variables from .env file
 dotenv.config();
 
-let stripe: Stripe | null = null;
-
 function getStripe() {
-  if (!stripe) {
-    const key = process.env.STRIPE_SECRET_KEY;
-    if (!key) {
-      console.warn('STRIPE_SECRET_KEY is not set. Payments will not work.');
-      return null;
-    }
-    stripe = new Stripe(key, { apiVersion: '2025-02-24.acacia' });
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) {
+    console.warn('STRIPE_SECRET_KEY is not set. Payments will not work.');
+    return null;
   }
-  return stripe;
+  return new Stripe(key, { apiVersion: '2025-02-24.acacia' });
 }
 
 const require = createRequire(import.meta.url);
@@ -34,8 +29,16 @@ const pdfParse = require('pdf-parse');
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Gemini AI - REMOVED FROM BACKEND
-// Always call Gemini API from the frontend code.
+// Initialize Gemini AI
+function getAI() {
+  // Use CUSTOM_GEMINI_API_KEY if provided, otherwise fall back to the platform's GEMINI_API_KEY
+  const key = process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+  if (!key) {
+    console.warn('No Gemini API key is set. AI features will not work.');
+    return null;
+  }
+  return new GoogleGenAI({ apiKey: key });
+}
 
 // In-memory database for MVP
 interface AppDatabase {
@@ -225,6 +228,34 @@ async function startServer() {
     db.courses = {};
     db.videos = {};
     res.json({ message: 'All data cleared' });
+  });
+
+  // AI Routes
+  app.post('/api/ai/generate', async (req, res) => {
+    const { model, contents, config, systemInstruction } = req.body;
+    const aiClient = getAI();
+    
+    if (!aiClient) {
+      return res.status(500).json({ error: 'AI is not configured on the server' });
+    }
+
+    try {
+      const requestConfig: any = { ...config };
+      if (systemInstruction) {
+        requestConfig.systemInstruction = systemInstruction;
+      }
+
+      const response = await aiClient.models.generateContent({
+        model: model || 'gemini-2.5-flash',
+        contents,
+        config: requestConfig
+      });
+      
+      res.json(response);
+    } catch (error: any) {
+      console.error('AI generation error:', error);
+      res.status(500).json({ error: error.message || 'Failed to generate content' });
+    }
   });
 
   // Stripe Routes

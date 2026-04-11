@@ -1,8 +1,8 @@
 import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
-import { X, CheckCircle, AlertCircle, Info } from 'lucide-react';
+import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-type ToastType = 'success' | 'error' | 'info';
+type ToastType = 'success' | 'error' | 'warning' | 'info';
 
 interface Toast {
   id: string;
@@ -31,7 +31,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ showToast }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-3 pointer-events-none">
         <AnimatePresence>
           {toasts.map((toast) => (
             <ToastItem key={toast.id} toast={toast} onRemove={() => removeToast(toast.id)} />
@@ -57,29 +57,32 @@ function ToastItem({ toast, onRemove }: { toast: Toast; onRemove: () => void }) 
   }, [onRemove]);
 
   const icons = {
-    success: <CheckCircle className="w-5 h-5 text-green-500" />,
+    success: <CheckCircle className="w-5 h-5 text-emerald-500" />,
     error: <AlertCircle className="w-5 h-5 text-red-500" />,
-    info: <Info className="w-5 h-5 text-blue-500" />,
+    warning: <AlertTriangle className="w-5 h-5 text-amber-500" />,
+    info: <Info className="w-5 h-5 text-indigo-500" />,
   };
 
   const bgColors = {
-    success: 'bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-900/30',
-    error: 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-900/30',
-    info: 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-900/30',
+    success: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/50',
+    error: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800/50',
+    warning: 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50',
+    info: 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800/50',
   };
 
   return (
     <motion.div
+      layout
       initial={{ opacity: 0, y: 20, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      className={`pointer-events-auto flex items-center p-4 rounded-lg border shadow-lg min-w-[300px] ${bgColors[toast.type]}`}
+      exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
+      className={`pointer-events-auto flex items-start p-4 rounded-xl border shadow-lg min-w-[320px] max-w-md backdrop-blur-sm ${bgColors[toast.type]}`}
     >
-      <div className="flex-shrink-0">{icons[toast.type]}</div>
-      <div className="ml-3 text-sm font-medium text-gray-900 dark:text-gray-100">{toast.message}</div>
+      <div className="flex-shrink-0 mt-0.5">{icons[toast.type]}</div>
+      <div className="ml-3 mr-4 text-sm font-medium text-slate-900 dark:text-slate-100 leading-relaxed">{toast.message}</div>
       <button
         onClick={onRemove}
-        className="ml-auto pl-3 flex-shrink-0 text-gray-400 hover:text-gray-500 dark:text-gray-500 dark:hover:text-gray-400 transition-colors"
+        className="ml-auto flex-shrink-0 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors"
       >
         <X className="w-4 h-4" />
       </button>

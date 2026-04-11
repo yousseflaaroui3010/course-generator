@@ -9,13 +9,18 @@
         "email": { "type": "string", "format": "email" },
         "displayName": { "type": "string" },
         "photoURL": { "type": "string" },
+        "headline": { "type": "string" },
+        "bio": { "type": "string" },
+        "avatar": { "type": "string" },
         "role": { "type": "string", "enum": ["student", "teacher", "admin"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "preferences": {
           "type": "object",
           "properties": {
-            "darkMode": { "type": "boolean" },
-            "dyslexicFont": { "type": "boolean" }
+            "language": { "type": "string" },
+            "topics": { "type": "array" },
+            "emailNotifications": { "type": "boolean" },
+            "weeklyReminders": { "type": "boolean" }
           }
         }
       },

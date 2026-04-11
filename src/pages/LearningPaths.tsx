@@ -1,124 +1,69 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, getDocs, orderBy, doc, getDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { BookOpen, Plus, Loader2, Trash2, Edit2, Play } from 'lucide-react';
+import { BookOpen, Play, CheckCircle2, Clock, Loader2, Award } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useToast } from '../components/Toast';
 
 export default function LearningPaths() {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
-  const { showToast } = useToast();
-  const [paths, setPaths] = useState<any[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'in-progress' | 'completed'>('in-progress');
   
-  // Create/Edit state
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [editingPath, setEditingPath] = useState<any | null>(null);
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    courseIds: [] as string[]
-  });
-
   useEffect(() => {
     const fetchData = async () => {
+      if (!user) return;
       setLoading(true);
       try {
-        // Fetch all learning paths
-        const pathsSnap = await getDocs(collection(db, 'learningPaths'));
-        setPaths(pathsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        // Fetch user's progress
+        const progressSnap = await getDocs(collection(db, 'users', user.uid, 'progress'));
+        const progressData = progressSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-        // Fetch all courses to populate selection
-        const coursesSnap = await getDocs(collection(db, 'courses'));
-        setCourses(coursesSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        const coursesWithProgress = [];
+
+        for (const prog of progressData) {
+          const courseRef = doc(db, 'courses', prog.courseId || prog.id);
+          const courseSnap = await getDoc(courseRef);
+          
+          if (courseSnap.exists()) {
+            const courseData = courseSnap.data();
+            const totalChapters = courseData.chapters?.length || 1;
+            const completedChapters = prog.lastChapterIndex !== undefined ? prog.lastChapterIndex + 1 : 0;
+            const progressPercentage = prog.completed ? 100 : Math.min(100, Math.round((completedChapters / totalChapters) * 100));
+
+            coursesWithProgress.push({
+              id: courseSnap.id,
+              ...courseData,
+              progress: progressPercentage,
+              lastAccessed: prog.updatedAt || null
+            });
+          }
+        }
+
+        // Sort by last accessed (descending)
+        coursesWithProgress.sort((a, b) => {
+          const dateA = a.lastAccessed ? new Date(a.lastAccessed).getTime() : 0;
+          const dateB = b.lastAccessed ? new Date(b.lastAccessed).getTime() : 0;
+          return dateB - dateA;
+        });
+
+        setCourses(coursesWithProgress);
       } catch (error) {
-        handleFirestoreError(error, OperationType.LIST, 'learningPaths/courses');
+        handleFirestoreError(error, OperationType.LIST, `users/${user?.uid}/progress`);
       } finally {
         setLoading(false);
       }
     };
     fetchData();
-  }, []);
+  }, [user]);
 
-  const handleOpenModal = (path: any = null) => {
-    if (path) {
-      setEditingPath(path);
-      setFormData({
-        title: path.title,
-        description: path.description,
-        courseIds: path.courseIds || []
-      });
-    } else {
-      setEditingPath(null);
-      setFormData({ title: '', description: '', courseIds: [] });
-    }
-    setIsModalOpen(true);
-  };
-
-  const handleToggleCourse = (courseId: string) => {
-    setFormData(prev => {
-      const isSelected = prev.courseIds.includes(courseId);
-      if (isSelected) {
-        return { ...prev, courseIds: prev.courseIds.filter(id => id !== courseId) };
-      } else {
-        return { ...prev, courseIds: [...prev.courseIds, courseId] };
-      }
-    });
-  };
-
-  const handleSave = async () => {
-    if (!formData.title || formData.courseIds.length === 0) {
-      showToast('Please provide a title and select at least one course', 'error');
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      const pathData = {
-        title: formData.title,
-        description: formData.description,
-        courseIds: formData.courseIds,
-        creatorId: user?.uid,
-        createdAt: editingPath ? editingPath.createdAt : new Date().toISOString()
-      };
-
-      if (editingPath) {
-        await updateDoc(doc(db, 'learningPaths', editingPath.id), pathData);
-        setPaths(paths.map(p => p.id === editingPath.id ? { id: p.id, ...pathData } : p));
-        showToast('Learning path updated', 'success');
-      } else {
-        const docRef = await addDoc(collection(db, 'learningPaths'), pathData);
-        setPaths([{ id: docRef.id, ...pathData }, ...paths]);
-        showToast('Learning path created', 'success');
-      }
-      setIsModalOpen(false);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'learningPaths');
-      showToast('Failed to save learning path', 'error');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this learning path?')) return;
-    try {
-      await deleteDoc(doc(db, 'learningPaths', id));
-      setPaths(paths.filter(p => p.id !== id));
-      showToast('Learning path deleted', 'success');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'learningPaths');
-      showToast('Failed to delete', 'error');
-    }
-  };
-
-  const getCourseDetails = (courseId: string) => {
-    return courses.find(c => c.id === courseId);
-  };
+  const inProgressCourses = courses.filter(c => c.progress < 100);
+  const completedCourses = courses.filter(c => c.progress === 100);
+  
+  // Find the most recently accessed course that is not completed
+  const recentCourse = inProgressCourses.length > 0 ? inProgressCourses[0] : null;
 
   if (loading) {
     return (
@@ -130,175 +75,138 @@ export default function LearningPaths() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Learning Paths</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-2">Curated sequences of courses to help you master a topic.</p>
-        </div>
-        {(profile?.role === 'teacher' || profile?.role === 'admin') && (
-          <button 
-            onClick={() => handleOpenModal()}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 flex items-center"
-          >
-            <Plus className="w-5 h-5 mr-2" />
-            Create Path
-          </button>
-        )}
+      <div>
+        <h1 className="text-3xl font-display font-bold text-slate-900 dark:text-white tracking-tight">My Learning</h1>
+        <p className="text-slate-600 dark:text-slate-400 mt-2">Track your progress and continue where you left off.</p>
       </div>
 
-      {paths.length === 0 ? (
-        <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 border-dashed">
-          <BookOpen className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">No Learning Paths Yet</h3>
-          <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto">
-            Learning paths group multiple courses together to form a comprehensive curriculum.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-8">
-          {paths.map(path => (
-            <div key={path.id} className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm">
-              <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-start bg-gray-50 dark:bg-gray-800/50">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{path.title}</h2>
-                  <p className="text-gray-600 dark:text-gray-400 mt-2">{path.description}</p>
+      {/* Continue Learning Banner */}
+      {recentCourse && (
+        <div className="bg-slate-900 dark:bg-slate-800 rounded-3xl p-8 text-white shadow-xl relative overflow-hidden border border-slate-800 dark:border-slate-700">
+          <div className="absolute top-0 right-0 -mt-10 -mr-10 w-64 h-64 bg-slate-800 dark:bg-slate-700 opacity-50 rounded-full blur-3xl"></div>
+          <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+            <div className="flex-1">
+              <div className="flex items-center space-x-2 mb-3">
+                <Clock className="w-4 h-4 text-slate-400" />
+                <span className="text-sm font-medium text-slate-300 uppercase tracking-wider">Jump back in</span>
+              </div>
+              <h2 className="text-2xl md:text-3xl font-display font-bold mb-2">{recentCourse.title}</h2>
+              <div className="flex items-center space-x-4 mt-4">
+                <div className="flex-1 max-w-xs bg-slate-800 dark:bg-slate-900 rounded-full h-2 overflow-hidden">
+                  <div 
+                    className="bg-emerald-500 h-full rounded-full" 
+                    style={{ width: `${recentCourse.progress}%` }}
+                  />
                 </div>
-                {(profile?.role === 'admin' || (profile?.role === 'teacher' && path.creatorId === user?.uid)) && (
-                  <div className="flex space-x-2">
-                    <button 
-                      onClick={() => handleOpenModal(path)}
-                      className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                    >
-                      <Edit2 className="w-5 h-5" />
-                    </button>
-                    <button 
-                      onClick={() => handleDelete(path.id)}
-                      className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
+                <span className="text-sm font-medium text-slate-300">{recentCourse.progress}% Complete</span>
+              </div>
+            </div>
+            <button 
+              onClick={() => navigate(`/course/${recentCourse.id}`)}
+              className="px-8 py-4 bg-white text-slate-900 font-bold rounded-xl shadow-lg hover:bg-slate-100 hover:scale-105 transition-all flex items-center flex-shrink-0"
+            >
+              <Play className="w-5 h-5 mr-2 fill-current" />
+              Continue Learning
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div className="border-b border-slate-200 dark:border-slate-800">
+        <nav className="-mb-px flex space-x-8">
+          <button
+            onClick={() => setActiveTab('in-progress')}
+            className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+              activeTab === 'in-progress'
+                ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 dark:text-slate-400 dark:hover:text-slate-300'
+            }`}
+          >
+            In Progress ({inProgressCourses.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('completed')}
+            className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+              activeTab === 'completed'
+                ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 dark:text-slate-400 dark:hover:text-slate-300'
+            }`}
+          >
+            Completed ({completedCourses.length})
+          </button>
+        </nav>
+      </div>
+
+      {/* Course Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {(activeTab === 'in-progress' ? inProgressCourses : completedCourses).length === 0 ? (
+          <div className="col-span-full text-center py-16 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 border-dashed">
+            <BookOpen className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-slate-900 dark:text-white">No courses found</h3>
+            <p className="text-slate-500 dark:text-slate-400 mt-1">
+              {activeTab === 'in-progress' 
+                ? "You haven't started any courses yet. Head to Discover to find something new!" 
+                : "You haven't completed any courses yet. Keep learning!"}
+            </p>
+            {activeTab === 'in-progress' && (
+              <button 
+                onClick={() => navigate('/discover')}
+                className="mt-6 px-6 py-2.5 bg-slate-900 text-white dark:bg-white dark:text-slate-900 rounded-xl font-medium hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors shadow-sm"
+              >
+                Browse Courses
+              </button>
+            )}
+          </div>
+        ) : (
+          (activeTab === 'in-progress' ? inProgressCourses : completedCourses).map(course => (
+            <div 
+              key={course.id} 
+              className="group bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col h-full cursor-pointer"
+              onClick={() => navigate(`/course/${course.id}`)}
+            >
+              <div className="h-40 bg-slate-100 dark:bg-slate-800 relative overflow-hidden">
+                <img 
+                  src={`https://picsum.photos/seed/${course.id}/400/200?grayscale`} 
+                  alt={course.title} 
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-90 group-hover:opacity-100"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent opacity-60 group-hover:opacity-40 transition-opacity" />
+                {activeTab === 'completed' && (
+                  <div className="absolute top-4 right-4 bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-bold flex items-center shadow-sm">
+                    <Award className="w-3 h-3 mr-1" />
+                    Completed
                   </div>
                 )}
               </div>
               
-              <div className="p-6">
-                <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">Courses in this path</h3>
-                <div className="space-y-4">
-                  {path.courseIds.map((courseId: string, index: number) => {
-                    const course = getCourseDetails(courseId);
-                    if (!course) return null;
-                    
-                    return (
-                      <div key={courseId} className="flex items-center p-4 rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/30 hover:border-indigo-200 dark:hover:border-indigo-800 transition-colors group">
-                        <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold mr-4 flex-shrink-0">
-                          {index + 1}
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{course.title}</h4>
-                          <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-1">{course.description}</p>
-                        </div>
-                        <button 
-                          onClick={() => navigate(`/course/${course.id}`)}
-                          className="ml-4 p-3 bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-400 rounded-full shadow-sm hover:bg-indigo-50 dark:hover:bg-gray-600 transition-colors"
-                        >
-                          <Play className="w-5 h-5 ml-0.5" />
-                        </button>
-                      </div>
-                    );
-                  })}
+              <div className="p-6 flex flex-col flex-grow">
+                <h3 className="text-lg font-display font-bold text-slate-900 dark:text-white mb-2 group-hover:text-slate-700 dark:group-hover:text-slate-300 transition-colors line-clamp-2">
+                  {course.title}
+                </h3>
+                
+                <div className="mt-auto pt-4">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                      {activeTab === 'completed' ? '100% Complete' : `${course.progress}% Complete`}
+                    </span>
+                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                      {course.chapters?.length || 0} Lessons
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                    <div 
+                      className={`h-full rounded-full ${activeTab === 'completed' ? 'bg-emerald-500' : 'bg-slate-900 dark:bg-slate-100'}`}
+                      style={{ width: `${course.progress}%` }}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* Create/Edit Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                {editingPath ? 'Edit Learning Path' : 'Create Learning Path'}
-              </h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                &times;
-              </button>
-            </div>
-            
-            <div className="p-6 space-y-6 overflow-y-auto flex-1">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Path Title</label>
-                <input 
-                  type="text" 
-                  value={formData.title}
-                  onChange={e => setFormData({...formData, title: e.target.value})}
-                  className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:ring-indigo-500 focus:border-indigo-500"
-                  placeholder="e.g., Frontend Developer Bootcamp"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
-                <textarea 
-                  rows={3}
-                  value={formData.description}
-                  onChange={e => setFormData({...formData, description: e.target.value})}
-                  className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:ring-indigo-500 focus:border-indigo-500"
-                  placeholder="What will students achieve?"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Select Courses (in order)</label>
-                <div className="space-y-2 border border-gray-200 dark:border-gray-700 rounded-xl p-2 max-h-64 overflow-y-auto">
-                  {courses.map(course => {
-                    const isSelected = formData.courseIds.includes(course.id);
-                    const orderIndex = formData.courseIds.indexOf(course.id);
-                    
-                    return (
-                      <div 
-                        key={course.id}
-                        onClick={() => handleToggleCourse(course.id)}
-                        className={`flex items-center p-3 rounded-lg cursor-pointer transition-colors ${
-                          isSelected ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800' : 'hover:bg-gray-50 dark:hover:bg-gray-800 border border-transparent'
-                        }`}
-                      >
-                        <div className={`w-6 h-6 rounded border flex items-center justify-center mr-3 ${
-                          isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-300 dark:border-gray-600'
-                        }`}>
-                          {isSelected && <span className="text-xs font-bold">{orderIndex + 1}</span>}
-                        </div>
-                        <div className="flex-1">
-                          <p className={`font-medium ${isSelected ? 'text-indigo-900 dark:text-indigo-100' : 'text-gray-900 dark:text-white'}`}>
-                            {course.title}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-            
-            <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex justify-end space-x-3 bg-gray-50 dark:bg-gray-800/50">
-              <button 
-                onClick={() => setIsModalOpen(false)}
-                className="px-6 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 font-medium"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={handleSave}
-                disabled={isSaving}
-                className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center font-medium"
-              >
-                {isSaving ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : null}
-                Save Path
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          ))
+        )}
+      </div>
     </div>
   );
 }

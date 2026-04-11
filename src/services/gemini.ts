@@ -1,16 +1,3 @@
-import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
-import OpenAI from "openai";
-
-// Initialize Gemini AI for image/audio
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-
-// Initialize OpenRouter for text generation
-const openRouter = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: import.meta.env.VITE_OPEN_ROUTER_API_KEY || '',
-  dangerouslyAllowBrowser: true,
-});
-
 /**
  * Wraps raw L16 PCM data in a WAV header to make it playable by standard audio tags.
  * @param base64Pcm The base64 encoded raw PCM data (L16, mono).
@@ -64,6 +51,17 @@ function wrapPcmInWav(base64Pcm: string, sampleRate: number): string {
 function repairJson(json: string): string {
   let repaired = json.trim();
   
+  // Remove markdown code blocks if present
+  if (repaired.startsWith('```json')) {
+    repaired = repaired.replace(/^```json\n?/, '');
+  } else if (repaired.startsWith('```')) {
+    repaired = repaired.replace(/^```\n?/, '');
+  }
+  if (repaired.endsWith('```')) {
+    repaired = repaired.replace(/\n?```$/, '');
+  }
+  repaired = repaired.trim();
+  
   // If it's already valid, return it
   try {
     JSON.parse(repaired);
@@ -116,10 +114,35 @@ function repairJson(json: string): string {
   return repaired;
 }
 
+async function callBackendAI(model: string, contents: any[], config: any = {}, systemInstruction?: string) {
+  const response = await fetch('/api/ai/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, contents, config, systemInstruction })
+  });
+
+  const text = await response.text();
+
+  if (!response.ok) {
+    try {
+      const errorData = JSON.parse(text);
+      throw new Error(errorData.error || `Backend AI error: ${response.status}`);
+    } catch (e) {
+      throw new Error(`Backend AI error: ${response.status} ${text.substring(0, 100)}`);
+    }
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error(`Failed to parse backend response as JSON: ${text.substring(0, 100)}`);
+  }
+}
+
 export const geminiService = {
   async generateCourse(sourceText: string, level: string, tone: string, options: any) {
     const isImage = sourceText.startsWith('IMAGE_DATA:');
-    let messages: any[] = [];
+    let contents: any[] = [];
 
     const systemInstruction = `You are an expert instructional designer specializing in accessible education. 
     Your task is to transform any provided source material (text or image) into a high-quality, structured educational course. 
@@ -158,12 +181,11 @@ export const geminiService = {
       const parts = sourceText.split(':');
       const mimeType = parts[1];
       const base64Data = parts[2];
-      messages = [
-        { role: 'system', content: systemInstruction },
+      contents = [
         {
           role: 'user',
-          content: [
-            { type: 'text', text: `Create a structured educational course based on the provided image. 
+          parts: [
+            { text: `Create a structured educational course based on the provided image. 
               Target Audience Level: ${level}
               Tone: ${tone}
               Include Quizzes: ${options.quizzes}
@@ -174,7 +196,7 @@ export const geminiService = {
               - The 'content' field MUST be concise Markdown (max 400 words). Use headings and bullet points.
               - If 'quizzes' is true, each chapter MUST have a 'quiz' array with 3 questions.
               - If 'visuals' is true, each chapter MUST have 'visualMetadata' with a 'type' and 'prompt'.` },
-            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Data}` } }
+            { inlineData: { mimeType, data: base64Data } }
           ]
         }
       ];
@@ -194,19 +216,19 @@ export const geminiService = {
         Source Material:
         ${sourceText.substring(0, 20000)}
         `;
-      messages = [
-        { role: 'system', content: systemInstruction },
-        { role: 'user', content: prompt }
+      contents = [
+        { role: 'user', parts: [{ text: prompt }] }
       ];
     }
 
-    const response = await openRouter.chat.completions.create({
-      model: 'anthropic/claude-3.5-sonnet',
-      messages,
-      response_format: { type: 'json_object' }
-    });
+    const response = await callBackendAI(
+      'gemini-2.5-flash',
+      contents,
+      { responseMimeType: 'application/json' },
+      systemInstruction
+    );
 
-    const text = response.choices[0]?.message?.content;
+    const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error('AI returned an empty response');
     
     try {
@@ -267,19 +289,19 @@ export const geminiService = {
     Content to rewrite:
     ${content}`;
     
-    const response = await openRouter.chat.completions.create({
-      model: 'anthropic/claude-3.5-sonnet',
-      messages: [{ role: 'user', content: prompt }]
-    });
+    const response = await callBackendAI(
+      'gemini-2.5-flash',
+      [{ role: 'user', parts: [{ text: prompt }] }]
+    );
     
-    return response.choices[0]?.message?.content || content;
+    return response.candidates?.[0]?.content?.parts?.[0]?.text || content;
   },
 
   async generateAudio(text: string, voiceName: string = 'Puck') {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: `Read this educational content clearly: ${text.substring(0, 2000)}` }] }],
-      config: {
+    const response = await callBackendAI(
+      'gemini-2.5-flash-preview-tts',
+      [{ role: 'user', parts: [{ text: `Read this educational content clearly: ${text.substring(0, 2000)}` }] }],
+      {
         responseModalities: ["AUDIO"],
         speechConfig: {
           voiceConfig: {
@@ -289,22 +311,20 @@ export const geminiService = {
           }
         }
       }
-    });
+    );
     
     const base64Data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!base64Data) return null;
 
-    // The Gemini TTS returns raw PCM (L16, 24kHz, mono).
-    // To make it playable in a standard <audio> tag, we wrap it in a WAV header.
     return wrapPcmInWav(base64Data, 24000);
   },
 
   async generateImage(prompt: string) {
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      });
+      const response = await callBackendAI(
+        'gemini-2.5-flash-image',
+        [{ role: 'user', parts: [{ text: prompt }] }]
+      );
       
       const candidates = response.candidates;
       if (!candidates || candidates.length === 0) return null;
@@ -360,16 +380,14 @@ export const geminiService = {
       ]
     }`;
 
-    const response = await openRouter.chat.completions.create({
-      model: 'anthropic/claude-3.5-sonnet',
-      messages: [
-        { role: 'system', content: systemInstruction },
-        { role: 'user', content: prompt }
-      ],
-      response_format: { type: 'json_object' }
-    });
+    const response = await callBackendAI(
+      'gemini-2.5-flash',
+      [{ role: 'user', parts: [{ text: prompt }] }],
+      { responseMimeType: 'application/json' },
+      systemInstruction
+    );
 
-    const text = response.choices[0]?.message?.content;
+    const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error('AI returned an empty response');
     
     try {
@@ -434,16 +452,14 @@ export const geminiService = {
       ]
     }`;
 
-    const response = await openRouter.chat.completions.create({
-      model: 'anthropic/claude-3.5-sonnet',
-      messages: [
-        { role: 'system', content: systemInstruction },
-        { role: 'user', content: aiPrompt }
-      ],
-      response_format: { type: 'json_object' }
-    });
+    const response = await callBackendAI(
+      'gemini-2.5-flash',
+      [{ role: 'user', parts: [{ text: aiPrompt }] }],
+      { responseMimeType: 'application/json' },
+      systemInstruction
+    );
 
-    const text = response.choices[0]?.message?.content;
+    const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error('AI returned an empty response');
     
     try {
@@ -484,30 +500,29 @@ export const geminiService = {
 
   async chatWithTutor(message: string, chapterContent: string, previousMessages: { role: 'user' | 'model', text: string }[]) {
     try {
-      const formattedHistory = previousMessages.map(msg => ({
-        role: msg.role === 'model' ? 'assistant' : 'user',
-        content: msg.text
+      const contents = previousMessages.map(msg => ({
+        role: msg.role,
+        parts: [{ text: msg.text }]
       }));
+      
+      contents.push({ role: 'user', parts: [{ text: message }] });
 
-      const response = await openRouter.chat.completions.create({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          {
-            role: "system",
-            content: `You are an expert AI teaching assistant named Khanmigo.
+      const systemInstruction = `You are an expert AI teaching assistant named Khanmigo.
 Your goal is to help the student understand the current chapter material.
 DO NOT just give them the answer. Use the Socratic method to guide them to the answer.
 Be encouraging, concise, and clear.
 
 CURRENT CHAPTER CONTENT:
-${chapterContent}`
-          },
-          ...formattedHistory,
-          { role: "user", content: message }
-        ]
-      });
+${chapterContent}`;
 
-      return response.choices[0]?.message?.content || "I'm sorry, I couldn't process that.";
+      const response = await callBackendAI(
+        'gemini-2.5-flash',
+        contents,
+        {},
+        systemInstruction
+      );
+
+      return response.candidates?.[0]?.content?.parts?.[0]?.text || "I'm sorry, I couldn't process that.";
     } catch (error) {
       console.error('Tutor chat error:', error);
       throw new Error('Failed to communicate with the AI tutor.');

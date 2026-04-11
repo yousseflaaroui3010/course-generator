@@ -14,8 +14,12 @@ interface UserProfile {
   streak?: number;
   lastActive?: string;
   preferences: {
-    darkMode: boolean;
-    dyslexicFont: boolean;
+    language?: string;
+    topics?: string[];
+    emailNotifications?: boolean;
+    weeklyReminders?: boolean;
+    darkMode?: boolean;
+    dyslexicFont?: boolean;
   };
   subscription?: {
     status: string;
@@ -89,6 +93,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               streak: 0,
               lastActive: new Date().toISOString(),
               preferences: {
+                language: 'English',
+                topics: [],
+                emailNotifications: true,
+                weeklyReminders: false,
                 darkMode: false,
                 dyslexicFont: false,
               },
