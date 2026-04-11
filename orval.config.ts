@@ -1,15 +1,20 @@
 import { defineConfig } from 'orval';
 
 /**
- * Orval code-generation config (T-11.3.2)
+ * Orval 6.31.0 code-generation config (T-11.3.2)
  *
  * Input:  openapi/lumina-api.yaml
  * Output: client/src/api/generated/
- *   - *.ts  — TanStack React Query v5 hooks (one file per tag)
- *   - model/ — TypeScript interfaces for every schema
+ *   - One file per OpenAPI tag (mode: tags-split)
+ *   - TanStack React Query v5 hooks (auto-detected from @tanstack/react-query v5)
+ *   - TypeScript model interfaces in model/ subdirectory
+ *
+ * Custom fetcher: client/src/api/fetcher.ts
+ *   - Injects Authorization: Bearer <token> from oidc-spa (in-memory)
+ *   - Throws structured ApiError on non-2xx matching OpenAPI error schema
  *
  * Run:  pnpm gen:api
- * CI:   re-run whenever openapi/lumina-api.yaml changes
+ * CI:   run after any change to openapi/lumina-api.yaml
  */
 export default defineConfig({
   luminaApi: {
@@ -20,10 +25,8 @@ export default defineConfig({
       target: './client/src/api/generated/index.ts',
       schemas: './client/src/api/generated/model',
       client: 'react-query',
-      httpClient: 'fetch',
-      mode: 'tags-split',     // one file per OpenAPI tag
-      clean: true,            // wipe output dir before each run
-      prettier: true,
+      mode: 'tags-split',
+      clean: true,
       override: {
         mutator: {
           path: './client/src/api/fetcher.ts',
@@ -32,13 +35,9 @@ export default defineConfig({
         query: {
           useQuery: true,
           useMutation: true,
-          useInfiniteQuery: false,
           signal: true,
         },
       },
-    },
-    hooks: {
-      afterAllFilesWrite: 'prettier --write ./client/src/api/generated',
     },
   },
 });
